@@ -25,3 +25,6 @@ data/
 .ipynb_checkpoints/
 .mypy_cache/
 *.log
+# Documentos locais com inventario e auditoria legada
+docs/inventario_dados.csv
+docs/auditoria_dados.md
