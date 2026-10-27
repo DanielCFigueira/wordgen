@@ -17,12 +17,28 @@ Regras:
   - Fase 4: sem subpastas — "PRE" no nome = pré-teste; prefixo "2 " = pós-teste
 """
 
+import json
 import os
 import re
+import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# Adiciona src ao path para importar wordgen.domain
+BASE_DIR = Path(__file__).resolve().parents[1]
+if str(BASE_DIR / "src") not in sys.path:
+    sys.path.insert(0, str(BASE_DIR / "src"))
+
+from wordgen.domain.padronizacao import classificar_celula
+
+# Contadores de flags de limpeza por instrumento
+CONTADORES_FLAGS = {
+    "vocabulario": Counter(),
+    "tde": Counter(),
+}
 
 # ─────────────────────────────────────────────
 # CONFIGURAÇÕES
@@ -220,24 +236,21 @@ def normalizar_vocabulario(df, fase, periodo, monitor="", coord=""):
         # Matrícula
         mat = converter_matricula(row.get(mat_col)) if mat_col else np.nan
 
-        # Questões — converter para float, 'D' → NaN
+        # Questões — classificar com classificar_celula (máximo 1)
         questoes = {}
-        for q in q_cols:
-            v = row.get(q, np.nan)
-            if str(v).strip().upper() == "D":
-                questoes[q] = np.nan
-            else:
-                try:
-                    questoes[q] = float(v)
-                except Exception:
-                    questoes[q] = np.nan
+        for i in range(1, 51):
+            chave = f"Q{i:02d}"
+            c_orig = next((c for c in q_cols if c == f"Q{i}" or c == chave), None)
+            val_raw = row.get(c_orig, np.nan) if c_orig else np.nan
+            val_limpo, flag = classificar_celula(val_raw, max_valor=1)
+            CONTADORES_FLAGS["vocabulario"][flag] += 1
+            questoes[chave] = val_limpo if flag == "ok" else np.nan
 
-        # Total calculado (fallback)
-        total_calc = sum(v for v in questoes.values() if not np.isnan(v))
-        try:
-            total_val = float(str(total).replace(",", ".")) if not pd.isna(total) else total_calc
-        except Exception:
-            total_val = total_calc
+        n_itens = 50
+        n_validos = sum(1 for v in questoes.values() if not pd.isna(v))
+        pct_completude = round(n_validos / n_itens, 4)
+        completo = bool(pct_completude >= 0.80)
+        total_val = float(sum(v for v in questoes.values() if not pd.isna(v))) if n_validos > 0 else np.nan
 
         record = {
             "aluno_id":               aluno_id,
@@ -257,7 +270,11 @@ def normalizar_vocabulario(df, fase, periodo, monitor="", coord=""):
             "necessidade_deficiencia":nec,
             "responsavel_legal":      resp,
             "total_vocabulario":      total_val,
-            **{f"Q{i:02d}": questoes.get(f"Q{i}", np.nan) for i in range(1, 51)},
+            "n_itens":                n_itens,
+            "n_validos":              n_validos,
+            "pct_completude":         pct_completude,
+            "completo":               completo,
+            **questoes,
         }
         rows.append(record)
 
@@ -350,22 +367,21 @@ def normalizar_tde(df, fase, periodo, monitor="", coord=""):
         mon_planilha = row.get(monitor_col, np.nan) if monitor_col else np.nan
         mat = converter_matricula(row.get(mat_col)) if mat_col else np.nan
 
+        # Questões — classificar com classificar_celula (máximo 2)
         questoes = {}
-        for p in p_cols:
-            v = row.get(p, np.nan)
-            if str(v).strip().upper() == "D":
-                questoes[p] = np.nan
-            else:
-                try:
-                    questoes[p] = float(v)
-                except Exception:
-                    questoes[p] = np.nan
+        for i in range(1, 41):
+            chave = f"P{i:02d}"
+            c_orig = next((c for c in p_cols if c == f"P{i}" or c == chave), None)
+            val_raw = row.get(c_orig, np.nan) if c_orig else np.nan
+            val_limpo, flag = classificar_celula(val_raw, max_valor=2)
+            CONTADORES_FLAGS["tde"][flag] += 1
+            questoes[chave] = val_limpo if flag == "ok" else np.nan
 
-        total_calc = sum(v for v in questoes.values() if not np.isnan(v))
-        try:
-            total_val = float(str(total).replace(",", ".")) if not pd.isna(total) else total_calc
-        except Exception:
-            total_val = total_calc
+        n_itens = 40
+        n_validos = sum(1 for v in questoes.values() if not pd.isna(v))
+        pct_completude = round(n_validos / n_itens, 4)
+        completo = bool(pct_completude >= 0.80)
+        total_val = float(sum(v for v in questoes.values() if not pd.isna(v))) if n_validos > 0 else np.nan
 
         record = {
             "aluno_id":               aluno_id,
@@ -385,7 +401,11 @@ def normalizar_tde(df, fase, periodo, monitor="", coord=""):
             "necessidade_deficiencia":nec,
             "responsavel_legal":      resp,
             "total_tde":              total_val,
-            **{f"P{i:02d}": questoes.get(f"P{i}", np.nan) for i in range(1, 41)},
+            "n_itens":                n_itens,
+            "n_validos":              n_validos,
+            "pct_completude":         pct_completude,
+            "completo":               completo,
+            **questoes,
         }
         rows.append(record)
 
@@ -634,6 +654,18 @@ if socio_frames:
     out_socio = OUT_DIR / "dataset_socioeconomico.csv"
     df_socio.to_csv(out_socio, index=False, encoding="utf-8-sig")
     print(f"\n[SOCIOEC.]    {len(df_socio)} registros → {out_socio}")
+
+# ── Métricas de limpeza de células ──
+metricas_limpeza = {
+    "vocabulario": dict(CONTADORES_FLAGS["vocabulario"]),
+    "tde": dict(CONTADORES_FLAGS["tde"]),
+}
+out_metricas = OUT_DIR / "metricas_limpeza.json"
+with open(out_metricas, "w", encoding="utf-8") as f_met:
+    json.dump(metricas_limpeza, f_met, indent=2)
+print(f"\n[LIMPEZA] Métricas de células salvas → {out_metricas}")
+print(f"  Vocabulário: {metricas_limpeza['vocabulario']}")
+print(f"  TDE        : {metricas_limpeza['tde']}")
 
 # ── Log de processamento ──
 df_log = pd.DataFrame(log)
