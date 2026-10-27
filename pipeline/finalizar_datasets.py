@@ -182,6 +182,39 @@ def finalizar_datasets_avaliacao(df: pd.DataFrame) -> pd.DataFrame:
     return df_limpo
 
 
+def gerar_pareado(df: pd.DataFrame, total_col: str) -> pd.DataFrame:
+    """Gera tabela pareada (pré e pós do mesmo aluno e fase) com n_validos > 0."""
+    pre = df[df["periodo"] == "pre"].copy()
+    pos = df[df["periodo"] == "pos"].copy()
+
+    merged = pd.merge(
+        pre,
+        pos,
+        on=["aluno_id", "fase"],
+        suffixes=("_pre", "_pos"),
+    )
+
+    escola = merged["escola_pos"].fillna(merged["escola_pre"])
+    serie = merged["serie_pos"].fillna(merged["serie_pre"])
+    turma = merged["turma_pos"].fillna(merged["turma_pre"])
+
+    df_par = pd.DataFrame({
+        "aluno_id": merged["aluno_id"],
+        "fase": merged["fase"],
+        "escola": escola,
+        "serie": serie,
+        "turma": turma,
+        "total_pre": merged[f"{total_col}_pre"],
+        "total_pos": merged[f"{total_col}_pos"],
+        "pct_pre": merged["pct_completude_pre"],
+        "pct_pos": merged["pct_completude_pos"],
+        "completo_pre": merged["completo_pre"].astype(bool),
+        "completo_pos": merged["completo_pos"].astype(bool),
+    })
+
+    return df_par.sort_values(by=["aluno_id", "fase"])
+
+
 def main():
     print("\n" + "=" * 60)
     print("  FINALIZAÇÃO E SANITIZAÇÃO DE PRIVACIDADE (FINALIZAR_DATASETS)")
@@ -248,8 +281,50 @@ def main():
     print(f"  Distribuição zona: {dict(df_dim_aluno['zona'].value_counts())}")
     print(f"  Distribuição necessidade especial: {dict(df_dim_aluno['necessidade_especial'].value_counts())}")
 
+    # 6. Gerar tabelas pareadas (T7)
+    df_pareado_vocab = gerar_pareado(df_vocab_final, "total_vocabulario")
+    df_pareado_tde = gerar_pareado(df_tde_final, "total_tde")
+
+    df_pareado_vocab.to_parquet(FINAL_DIR / "pareado_vocabulario.parquet", index=False)
+    df_pareado_vocab.to_csv(FINAL_DIR / "pareado_vocabulario.csv", index=False, encoding="utf-8-sig")
+    df_pareado_tde.to_parquet(FINAL_DIR / "pareado_tde.parquet", index=False)
+    df_pareado_tde.to_csv(FINAL_DIR / "pareado_tde.csv", index=False, encoding="utf-8-sig")
+
+    print(f"\n[PAREADOS]    Tabelas pareadas salvas em data/final/:")
+    print(f"  pareado_vocabulario: {len(df_pareado_vocab)} linhas")
+    print(f"  pareado_tde        : {len(df_pareado_tde)} linhas")
+
+    # Métricas de referência para relatório e testes
+    metricas_pareadas = {
+        "vocabulario": {},
+        "tde": {},
+    }
+
+    print("\n--- Validação com referências T7 (apenas registros 'completo' em ambos os momentos) ---")
+    vc = df_pareado_vocab[df_pareado_vocab["completo_pre"] & df_pareado_vocab["completo_pos"]]
+    for f, g in vc.groupby("fase"):
+        metricas_pareadas["vocabulario"][int(f)] = {
+            "n": int(len(g)),
+            "media_pre": round(float(g["total_pre"].mean()), 2),
+            "media_pos": round(float(g["total_pos"].mean()), 2),
+        }
+        print(f"  Vocab Fase {f}: N={len(g)}, Média Pré={g['total_pre'].mean():.2f}, Média Pós={g['total_pos'].mean():.2f}")
+
+    tc = df_pareado_tde[df_pareado_tde["completo_pre"] & df_pareado_tde["completo_pos"]]
+    for f, g in tc.groupby("fase"):
+        metricas_pareadas["tde"][int(f)] = {
+            "n": int(len(g)),
+            "media_pre": round(float(g["total_pre"].mean()), 2),
+            "media_pos": round(float(g["total_pos"].mean()), 2),
+        }
+        print(f"  TDE Fase {f}  : N={len(g)}, Média Pré={g['total_pre'].mean():.2f}, Média Pós={g['total_pos'].mean():.2f}")
+
+    import json
+    with open(FINAL_DIR / "metricas_pareadas.json", "w", encoding="utf-8") as f_met:
+        json.dump(metricas_pareadas, f_met, indent=2)
+
     print("\n" + "=" * 60)
-    print("  FINALIZAÇÃO T6 CONCLUÍDA COM SUCESSO")
+    print("  FINALIZAÇÃO T6 E T7 CONCLUÍDA COM SUCESSO")
     print("=" * 60)
 
 
