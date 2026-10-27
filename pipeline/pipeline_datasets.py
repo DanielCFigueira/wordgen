@@ -17,6 +17,8 @@ Regras:
   - Fase 4: sem subpastas — "PRE" no nome = pré-teste; prefixo "2 " = pós-teste
 """
 
+import functools
+import hashlib
 import json
 import os
 import re
@@ -39,6 +41,23 @@ CONTADORES_FLAGS = {
     "vocabulario": Counter(),
     "tde": Counter(),
 }
+
+REVERSE_FILES = os.getenv("WORDGEN_REVERSE_FILES", "0").lower() in ("1", "true")
+
+
+@functools.lru_cache(maxsize=None)
+def calcular_arquivo_id(filepath):
+    """Calcula os 12 primeiros caracteres do SHA-256 do arquivo (sem nomes de pessoas)."""
+    h = hashlib.sha256()
+    with open(filepath, "rb") as fp:
+        while chunk := fp.read(65536):
+            h.update(chunk)
+    return h.hexdigest()[:12]
+
+
+def listar_csvs(diretorio):
+    """Retorna lista de CSVs ordenada determinística, permitindo inversão para teste."""
+    return sorted(diretorio.glob("*.csv"), reverse=REVERSE_FILES)
 
 # ─────────────────────────────────────────────
 # CONFIGURAÇÕES
@@ -124,15 +143,17 @@ def detectar_periodo_fase3(folder_path):
     return "desconhecido"
 
 def detectar_periodo_fase4(filename):
-    """Fase4: sem subpastas. PRE no nome = pré; prefixo '2 ' = pós."""
+    """Fase4: sem subpastas. PRE no nome = pré; prefixo '2 ' = pós.
+    Retorna tupla (periodo, periodo_fonte).
+    """
     fn = filename.lower()
     if "(pre)" in fn or "pré)" in fn or "pre)" in fn:
-        return "pre"
+        return "pre", "marcador_pre"
     # arquivos que começam com "2 " são pós-teste
     if re.match(r"^2[\s_]", filename.strip()):
-        return "pos"
+        return "pos", "prefixo_2"
     # outros sem prefixo "2 " e sem "(PRE)" — tratar como pré por default
-    return "pre"
+    return "pre", "padrao_pre"
 
 def extrair_monitor_coord(filename):
     """Extrai monitor e coordenador do nome do arquivo."""
@@ -151,7 +172,7 @@ def extrair_monitor_coord(filename):
 # ─────────────────────────────────────────────
 
 def ler_csv(filepath):
-    """Lê CSV com separador ';', ignorando linhas completamente vazias."""
+    """Lê CSV com separador ';', preservando a linha original e ignorando linhas completamente vazias."""
     try:
         df = pd.read_csv(
             filepath, sep=";", encoding="utf-8-sig",
@@ -162,16 +183,39 @@ def ler_csv(filepath):
             filepath, sep=";", encoding="latin-1",
             dtype=str, keep_default_na=False,
         )
-    # Remove linhas onde TODAS as colunas estão vazias
+    # Guarda linha de origem no arquivo original (1 é cabeçalho, então index 0 -> linha 2)
+    df["_linha_origem"] = df.index + 2
     df = df.replace("", np.nan)
-    df = df.dropna(how="all")
+    cols_dados = [c for c in df.columns if c != "_linha_origem"]
+    df = df.dropna(how="all", subset=cols_dados)
     return df
+
+def contar_conflitos(df, subset_chave, colunas_itens):
+    """Conta chaves que possuem 2+ registros com respostas válidas e itens divergentes."""
+    df_validos = df[df["n_validos"] > 0]
+    duplicados = df_validos[df_validos.duplicated(subset=subset_chave, keep=False)]
+    if duplicados.empty:
+        return 0
+
+    cols_existentes = [c for c in colunas_itens if c in df.columns]
+    conflitos = 0
+    for _, grupo in duplicados.groupby(subset_chave):
+        itens_df = grupo[cols_existentes]
+        tem_divergencia = False
+        for c in cols_existentes:
+            valores_distintos = itens_df[c].dropna().unique()
+            if len(valores_distintos) > 1:
+                tem_divergencia = True
+                break
+        if tem_divergencia:
+            conflitos += 1
+    return conflitos
 
 # ─────────────────────────────────────────────
 # NORMALIZAÇÃO — VOCABULÁRIO
 # ─────────────────────────────────────────────
 
-def normalizar_vocabulario(df, fase, periodo, monitor="", coord=""):
+def normalizar_vocabulario(df, fase, periodo, monitor="", coord="", arquivo_id="", periodo_fonte=""):
     """
     Retorna DataFrame normalizado para dataset vocabulário.
     Aceita os dois esquemas de colunas (Fase2 e Fase3/4).
@@ -252,6 +296,8 @@ def normalizar_vocabulario(df, fase, periodo, monitor="", coord=""):
         completo = bool(pct_completude >= 0.80)
         total_val = float(sum(v for v in questoes.values() if not pd.isna(v))) if n_validos > 0 else np.nan
 
+        linha_origem = int(row.get("_linha_origem", 0))
+
         record = {
             "aluno_id":               aluno_id,
             "matricula":              mat,
@@ -259,6 +305,7 @@ def normalizar_vocabulario(df, fase, periodo, monitor="", coord=""):
             "turma":                  turma,
             "fase":                   fase,
             "periodo":                periodo,
+            "periodo_fonte":          periodo_fonte,
             "ano_semestre":           {2: "2023.2", 3: "2024.1", 4: "2024.2"}.get(fase, ""),
             "monitor":                str(mon_planilha).strip() if not pd.isna(mon_planilha) else monitor,
             "coordenador":            coord,
@@ -274,6 +321,8 @@ def normalizar_vocabulario(df, fase, periodo, monitor="", coord=""):
             "n_validos":              n_validos,
             "pct_completude":         pct_completude,
             "completo":               completo,
+            "arquivo_id":             arquivo_id,
+            "linha_origem":           linha_origem,
             **questoes,
         }
         rows.append(record)
@@ -284,7 +333,7 @@ def normalizar_vocabulario(df, fase, periodo, monitor="", coord=""):
 # NORMALIZAÇÃO — TDE
 # ─────────────────────────────────────────────
 
-def normalizar_tde(df, fase, periodo, monitor="", coord=""):
+def normalizar_tde(df, fase, periodo, monitor="", coord="", arquivo_id="", periodo_fonte=""):
     """
     Retorna DataFrame normalizado para dataset TDE.
     Aceita os dois esquemas (Fase2 e Fase3/4).
@@ -313,7 +362,10 @@ def normalizar_tde(df, fase, periodo, monitor="", coord=""):
             # Montar sub-df com as colunas certas
             rename_map = {v: k for k, v in sub_cols.items()}
             sub_df = df.rename(columns=rename_map)
-            resultado = normalizar_tde(sub_df, fase=fase, periodo=per, monitor=monitor, coord=coord)
+            resultado = normalizar_tde(
+                sub_df, fase=fase, periodo=per, monitor=monitor, coord=coord,
+                arquivo_id=arquivo_id, periodo_fonte=periodo_fonte,
+            )
             if resultado is not None:
                 result_frames.append(resultado)
         if result_frames:
@@ -383,6 +435,8 @@ def normalizar_tde(df, fase, periodo, monitor="", coord=""):
         completo = bool(pct_completude >= 0.80)
         total_val = float(sum(v for v in questoes.values() if not pd.isna(v))) if n_validos > 0 else np.nan
 
+        linha_origem = int(row.get("_linha_origem", 0))
+
         record = {
             "aluno_id":               aluno_id,
             "matricula":              mat,
@@ -390,6 +444,7 @@ def normalizar_tde(df, fase, periodo, monitor="", coord=""):
             "turma":                  turma,
             "fase":                   fase,
             "periodo":                periodo,
+            "periodo_fonte":          periodo_fonte,
             "ano_semestre":           {2: "2023.2", 3: "2024.1", 4: "2024.2"}.get(fase, ""),
             "monitor":                str(mon_planilha).strip() if not pd.isna(mon_planilha) else monitor,
             "coordenador":            coord,
@@ -405,6 +460,8 @@ def normalizar_tde(df, fase, periodo, monitor="", coord=""):
             "n_validos":              n_validos,
             "pct_completude":         pct_completude,
             "completo":               completo,
+            "arquivo_id":             arquivo_id,
+            "linha_origem":           linha_origem,
             **questoes,
         }
         rows.append(record)
@@ -437,19 +494,24 @@ for periodo_folder in ["Pré-teste", "Pós-teste"]:
     if not periodo_path.exists():
         continue
     periodo = detectar_periodo_fase2(periodo_path)
+    periodo_fonte = "pasta"
 
     # Vocabulário
     for vocab_sub in ["1 - Avaliação de Vocabulário", "1 - Avaliação de vocabulário"]:
         vocab_path = periodo_path / vocab_sub
         if vocab_path.exists():
-            for f in vocab_path.glob("*.csv"):
+            for f in listar_csvs(vocab_path):
                 fn_lower = f.name.lower()
                 if deve_excluir(fn_lower):
                     registrar(2, periodo, f, "vocabulario", 0, "IGNORADO", "padrão de exclusão")
                     continue
+                arq_id = calcular_arquivo_id(f)
                 monitor, coord = extrair_monitor_coord(f.stem)
                 df_raw = ler_csv(f)
-                df_norm = normalizar_vocabulario(df_raw, fase=2, periodo=periodo, monitor=monitor, coord=coord)
+                df_norm = normalizar_vocabulario(
+                    df_raw, fase=2, periodo=periodo, monitor=monitor, coord=coord,
+                    arquivo_id=arq_id, periodo_fonte=periodo_fonte,
+                )
                 if df_norm is not None and len(df_norm) > 0:
                     vocab_frames.append(df_norm)
                     registrar(2, periodo, f, "vocabulario", len(df_norm), "OK")
@@ -460,14 +522,18 @@ for periodo_folder in ["Pré-teste", "Pós-teste"]:
     for tde_sub in ["TDE II - Subteste Escrita", "TDE II - Subteste de escrita"]:
         tde_path = periodo_path / tde_sub
         if tde_path.exists():
-            for f in tde_path.glob("*.csv"):
+            for f in listar_csvs(tde_path):
                 fn_lower = f.name.lower()
                 if deve_excluir(fn_lower):
                     registrar(2, periodo, f, "tde", 0, "IGNORADO", "padrão de exclusão")
                     continue
+                arq_id = calcular_arquivo_id(f)
                 monitor, coord = extrair_monitor_coord(f.stem)
                 df_raw = ler_csv(f)
-                df_norm = normalizar_tde(df_raw, fase=2, periodo=periodo, monitor=monitor, coord=coord)
+                df_norm = normalizar_tde(
+                    df_raw, fase=2, periodo=periodo, monitor=monitor, coord=coord,
+                    arquivo_id=arq_id, periodo_fonte=periodo_fonte,
+                )
                 if df_norm is not None and len(df_norm) > 0:
                     tde_frames.append(df_norm)
                     registrar(2, periodo, f, "tde", len(df_norm), "OK")
@@ -484,21 +550,26 @@ for periodo_folder in ["Pré-teste", "Pós-teste"]:
     if not periodo_path.exists():
         continue
     periodo = detectar_periodo_fase3(periodo_path)
+    periodo_fonte = "pasta"
 
     # Vocabulário — subpasta "Avaliação de Vocabulário"
     vocab_subpasta_files = set()
     for vocab_sub in ["Avaliação de Vocabulário", "Avaliação de vocabulário"]:
         vocab_path = periodo_path / vocab_sub
         if vocab_path.exists():
-            for f in vocab_path.glob("*.csv"):
+            for f in listar_csvs(vocab_path):
                 fn_lower = f.name.lower()
                 if deve_excluir(fn_lower):
                     registrar(3, periodo, f, "vocabulario", 0, "IGNORADO", "padrão de exclusão")
                     continue
                 vocab_subpasta_files.add(f.name)
+                arq_id = calcular_arquivo_id(f)
                 monitor, coord = extrair_monitor_coord(f.stem)
                 df_raw = ler_csv(f)
-                df_norm = normalizar_vocabulario(df_raw, fase=3, periodo=periodo, monitor=monitor, coord=coord)
+                df_norm = normalizar_vocabulario(
+                    df_raw, fase=3, periodo=periodo, monitor=monitor, coord=coord,
+                    arquivo_id=arq_id, periodo_fonte=periodo_fonte,
+                )
                 if df_norm is not None and len(df_norm) > 0:
                     vocab_frames.append(df_norm)
                     registrar(3, periodo, f, "vocabulario", len(df_norm), "OK")
@@ -507,14 +578,18 @@ for periodo_folder in ["Pré-teste", "Pós-teste"]:
 
     # Vocabulário — arquivos diretos na raiz do Pré/Pós-teste (pean_vocabulario)
     # Evitar duplicar arquivos que já estão na subpasta
-    for f in periodo_path.glob("*.csv"):
+    for f in listar_csvs(periodo_path):
         fn_lower = f.name.lower()
         if f.name in vocab_subpasta_files:
             continue
         if "_vocabulario" in fn_lower and not deve_excluir(fn_lower):
+            arq_id = calcular_arquivo_id(f)
             monitor, coord = extrair_monitor_coord(f.stem)
             df_raw = ler_csv(f)
-            df_norm = normalizar_vocabulario(df_raw, fase=3, periodo=periodo, monitor=monitor, coord=coord)
+            df_norm = normalizar_vocabulario(
+                df_raw, fase=3, periodo=periodo, monitor=monitor, coord=coord,
+                arquivo_id=arq_id, periodo_fonte=periodo_fonte,
+            )
             if df_norm is not None and len(df_norm) > 0:
                 vocab_frames.append(df_norm)
                 registrar(3, periodo, f, "vocabulario", len(df_norm), "OK", "raiz pré/pós-teste")
@@ -525,15 +600,19 @@ for periodo_folder in ["Pré-teste", "Pós-teste"]:
     tde_subpasta_files = set()
     tde_path = periodo_path / "TDE II"
     if tde_path.exists():
-        for f in tde_path.glob("*.csv"):
+        for f in listar_csvs(tde_path):
             fn_lower = f.name.lower()
             if deve_excluir(fn_lower):
                 registrar(3, periodo, f, "tde", 0, "IGNORADO", "padrão de exclusão")
                 continue
             tde_subpasta_files.add(f.name)
+            arq_id = calcular_arquivo_id(f)
             monitor, coord = extrair_monitor_coord(f.stem)
             df_raw = ler_csv(f)
-            df_norm = normalizar_tde(df_raw, fase=3, periodo=periodo, monitor=monitor, coord=coord)
+            df_norm = normalizar_tde(
+                df_raw, fase=3, periodo=periodo, monitor=monitor, coord=coord,
+                arquivo_id=arq_id, periodo_fonte=periodo_fonte,
+            )
             if df_norm is not None and len(df_norm) > 0:
                 tde_frames.append(df_norm)
                 registrar(3, periodo, f, "tde", len(df_norm), "OK")
@@ -542,14 +621,18 @@ for periodo_folder in ["Pré-teste", "Pós-teste"]:
 
     # TDE — arquivos diretos na raiz (pean_ted_ii)
     # Evitar duplicar arquivos que já estão na subpasta
-    for f in periodo_path.glob("*.csv"):
+    for f in listar_csvs(periodo_path):
         fn_lower = f.name.lower()
         if f.name in tde_subpasta_files:
             continue
         if ("_ted_ii" in fn_lower or "_tde_ii" in fn_lower) and not deve_excluir(fn_lower):
+            arq_id = calcular_arquivo_id(f)
             monitor, coord = extrair_monitor_coord(f.stem)
             df_raw = ler_csv(f)
-            df_norm = normalizar_tde(df_raw, fase=3, periodo=periodo, monitor=monitor, coord=coord)
+            df_norm = normalizar_tde(
+                df_raw, fase=3, periodo=periodo, monitor=monitor, coord=coord,
+                arquivo_id=arq_id, periodo_fonte=periodo_fonte,
+            )
             if df_norm is not None and len(df_norm) > 0:
                 tde_frames.append(df_norm)
                 registrar(3, periodo, f, "tde", len(df_norm), "OK", "raiz pré/pós-teste")
@@ -562,7 +645,7 @@ for periodo_folder in ["Pré-teste", "Pós-teste"]:
 fase4_base = RAW_DIR / "Fase4" / "WordGen - Dados"
 
 if fase4_base.exists():
-    for f in fase4_base.glob("*.csv"):
+    for f in listar_csvs(fase4_base):
         fn_lower = f.name.lower()
         fn_orig  = f.name
 
@@ -570,12 +653,16 @@ if fase4_base.exists():
             registrar(4, "?", f, "?", 0, "IGNORADO", "padrão de exclusão")
             continue
 
-        periodo = detectar_periodo_fase4(fn_orig)
+        periodo, periodo_fonte = detectar_periodo_fase4(fn_orig)
+        arq_id = calcular_arquivo_id(f)
         monitor, coord = extrair_monitor_coord(f.stem)
 
         if "_vocabulario" in fn_lower:
             df_raw = ler_csv(f)
-            df_norm = normalizar_vocabulario(df_raw, fase=4, periodo=periodo, monitor=monitor, coord=coord)
+            df_norm = normalizar_vocabulario(
+                df_raw, fase=4, periodo=periodo, monitor=monitor, coord=coord,
+                arquivo_id=arq_id, periodo_fonte=periodo_fonte,
+            )
             if df_norm is not None and len(df_norm) > 0:
                 vocab_frames.append(df_norm)
                 registrar(4, periodo, f, "vocabulario", len(df_norm), "OK")
@@ -584,7 +671,10 @@ if fase4_base.exists():
 
         elif "_ted_ii" in fn_lower or "_tde_ii" in fn_lower:
             df_raw = ler_csv(f)
-            df_norm = normalizar_tde(df_raw, fase=4, periodo=periodo, monitor=monitor, coord=coord)
+            df_norm = normalizar_tde(
+                df_raw, fase=4, periodo=periodo, monitor=monitor, coord=coord,
+                arquivo_id=arq_id, periodo_fonte=periodo_fonte,
+            )
             if df_norm is not None and len(df_norm) > 0:
                 tde_frames.append(df_norm)
                 registrar(4, periodo, f, "tde", len(df_norm), "OK")
@@ -599,14 +689,52 @@ print("\n" + "="*60)
 print("  CONSOLIDANDO DATASETS")
 print("="*60)
 
+metricas_dedup = {
+    "vocabulario": {},
+    "tde": {},
+    "socioeconomico": {},
+}
+
 # ── Vocabulário ──
 if vocab_frames:
     df_vocab = pd.concat(vocab_frames, ignore_index=True)
-    # Deduplicar: mesmo aluno_id + fase + periodo → manter primeiro registro não-nulo
+    n_bruto_v = len(df_vocab)
+
+    # Ordenar antes do drop_duplicates: aluno_id, fase, periodo, n_validos desc, arquivo_id asc, linha_origem asc
+    df_vocab = df_vocab.sort_values(
+        by=["aluno_id", "fase", "periodo", "n_validos", "arquivo_id", "linha_origem"],
+        ascending=[True, True, True, False, True, True],
+    )
+
+    # Contar chaves com conflito
+    q_cols_check = [f"Q{i:02d}" for i in range(1, 51)]
+    conflitos_v = contar_conflitos(df_vocab, ["aluno_id", "fase", "periodo"], q_cols_check)
+
+    # Deduplicar mantendo o primeiro
     df_vocab = df_vocab.drop_duplicates(subset=["aluno_id", "fase", "periodo"], keep="first")
+    n_dedup_v = len(df_vocab)
+
+    # Remover registros com n_validos == 0
+    vazios_v = int((df_vocab["n_validos"] == 0).sum())
+    df_vocab = df_vocab[df_vocab["n_validos"] > 0].copy()
+
+    # Ordenação fixa final
+    df_vocab = df_vocab.sort_values(by=["aluno_id", "fase", "periodo"])
+
     out_vocab = OUT_DIR / "dataset_vocabulario.csv"
     df_vocab.to_csv(out_vocab, index=False, encoding="utf-8-sig")
+
+    metricas_dedup["vocabulario"] = {
+        "linhas_brutas": n_bruto_v,
+        "duplicatas_removidas": n_bruto_v - n_dedup_v,
+        "conflitos": conflitos_v,
+        "vazios_removidos": vazios_v,
+        "linhas_finais": len(df_vocab),
+        "alunos_unicos": int(df_vocab["aluno_id"].nunique()),
+    }
+
     print(f"\n[VOCABULÁRIO] {len(df_vocab)} registros → {out_vocab}")
+    print(f"  Brutas: {n_bruto_v} | Duplicatas: {n_bruto_v - n_dedup_v} | Conflitos: {conflitos_v} | Vazios removidos: {vazios_v}")
     print(f"  Alunos únicos : {df_vocab['aluno_id'].nunique()}")
     print(f"  Escolas       : {df_vocab['escola'].nunique()}")
     print(f"  Turmas        : {df_vocab['turma'].nunique()}")
@@ -618,10 +746,38 @@ else:
 # ── TDE ──
 if tde_frames:
     df_tde = pd.concat(tde_frames, ignore_index=True)
+    n_bruto_t = len(df_tde)
+
+    df_tde = df_tde.sort_values(
+        by=["aluno_id", "fase", "periodo", "n_validos", "arquivo_id", "linha_origem"],
+        ascending=[True, True, True, False, True, True],
+    )
+
+    p_cols_check = [f"P{i:02d}" for i in range(1, 41)]
+    conflitos_t = contar_conflitos(df_tde, ["aluno_id", "fase", "periodo"], p_cols_check)
+
     df_tde = df_tde.drop_duplicates(subset=["aluno_id", "fase", "periodo"], keep="first")
+    n_dedup_t = len(df_tde)
+
+    vazios_t = int((df_tde["n_validos"] == 0).sum())
+    df_tde = df_tde[df_tde["n_validos"] > 0].copy()
+
+    df_tde = df_tde.sort_values(by=["aluno_id", "fase", "periodo"])
+
     out_tde = OUT_DIR / "dataset_tde.csv"
     df_tde.to_csv(out_tde, index=False, encoding="utf-8-sig")
+
+    metricas_dedup["tde"] = {
+        "linhas_brutas": n_bruto_t,
+        "duplicatas_removidas": n_bruto_t - n_dedup_t,
+        "conflitos": conflitos_t,
+        "vazios_removidos": vazios_t,
+        "linhas_finais": len(df_tde),
+        "alunos_unicos": int(df_tde["aluno_id"].nunique()),
+    }
+
     print(f"\n[TDE]         {len(df_tde)} registros → {out_tde}")
+    print(f"  Brutas: {n_bruto_t} | Duplicatas: {n_bruto_t - n_dedup_t} | Conflitos: {conflitos_t} | Vazios removidos: {vazios_t}")
     print(f"  Alunos únicos : {df_tde['aluno_id'].nunique()}")
     print(f"  Escolas       : {df_tde['escola'].nunique()}")
     print(f"  Turmas        : {df_tde['turma'].nunique()}")
@@ -635,6 +791,7 @@ socio_cols = [
     "aluno_id", "escola", "turma", "fase", "ano_semestre",
     "sexo", "data_nascimento", "idade", "cor_raca",
     "zona", "necessidade_deficiencia", "responsavel_legal",
+    "arquivo_id", "linha_origem",
 ]
 
 socio_frames = []
@@ -647,13 +804,39 @@ for ds_name, ds in [("vocabulario", df_vocab if vocab_frames else None),
 
 if socio_frames:
     df_socio = pd.concat(socio_frames, ignore_index=True)
+    n_bruto_s = len(df_socio)
+
+    campos_socio_validar = [c for c in [
+        "sexo", "data_nascimento", "idade", "cor_raca", "zona",
+        "necessidade_deficiencia", "responsavel_legal"
+    ] if c in df_socio.columns]
+    df_socio["n_preenchidos"] = df_socio[campos_socio_validar].notna().sum(axis=1)
+
+    df_socio = df_socio.sort_values(
+        by=["aluno_id", "fase", "n_preenchidos", "arquivo_id", "linha_origem"],
+        ascending=[True, True, False, True, True],
+    )
     df_socio = df_socio.drop_duplicates(subset=["aluno_id", "fase"], keep="first")
+
     # Manter apenas registros com pelo menos sexo ou cor_raca preenchido
     mask = df_socio["sexo"].notna() | df_socio["cor_raca"].notna() if "sexo" in df_socio.columns else df_socio.notna().any(axis=1)
-    df_socio = df_socio[mask]
+    df_socio = df_socio[mask].copy()
+
+    df_socio = df_socio.sort_values(by=["aluno_id", "fase"])
+
     out_socio = OUT_DIR / "dataset_socioeconomico.csv"
     df_socio.to_csv(out_socio, index=False, encoding="utf-8-sig")
+
+    metricas_dedup["socioeconomico"] = {
+        "linhas_brutas": n_bruto_s,
+        "linhas_finais": len(df_socio),
+        "alunos_unicos": int(df_socio["aluno_id"].nunique()),
+    }
     print(f"\n[SOCIOEC.]    {len(df_socio)} registros → {out_socio}")
+
+out_dedup_json = OUT_DIR / "metricas_deduplicacao.json"
+with open(out_dedup_json, "w", encoding="utf-8") as f_d:
+    json.dump(metricas_dedup, f_d, indent=2)
 
 # ── Métricas de limpeza de células ──
 metricas_limpeza = {
