@@ -34,7 +34,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR / "src") not in sys.path:
     sys.path.insert(0, str(BASE_DIR / "src"))
 
-from wordgen.domain.padronizacao import classificar_celula
+from wordgen.domain.padronizacao import classificar_celula, padronizar_turma
 
 # Contadores de flags de limpeza por instrumento
 CONTADORES_FLAGS = {
@@ -262,7 +262,7 @@ def normalizar_vocabulario(df, fase, periodo, monitor="", coord="", arquivo_id="
             continue
 
         escola = normalizar_escola(row.get(escola_col)) if escola_col else np.nan
-        turma  = normalizar_turma(row.get(turma_col))  if turma_col  else np.nan
+        serie, turma_letra, turma = padronizar_turma(row.get(turma_col)) if turma_col else (np.nan, np.nan, np.nan)
         total  = row.get(total_col, np.nan) if total_col else np.nan
 
         # Socioeconômico
@@ -302,6 +302,8 @@ def normalizar_vocabulario(df, fase, periodo, monitor="", coord="", arquivo_id="
             "aluno_id":               aluno_id,
             "matricula":              mat,
             "escola":                 escola,
+            "serie":                  serie,
+            "turma_letra":            turma_letra,
             "turma":                  turma,
             "fase":                   fase,
             "periodo":                periodo,
@@ -405,7 +407,7 @@ def normalizar_tde(df, fase, periodo, monitor="", coord="", arquivo_id="", perio
             continue
 
         escola = normalizar_escola(row.get(escola_col)) if escola_col else np.nan
-        turma  = normalizar_turma(row.get(turma_col))  if turma_col  else np.nan
+        serie, turma_letra, turma = padronizar_turma(row.get(turma_col)) if turma_col else (np.nan, np.nan, np.nan)
         total  = row.get(total_col, np.nan) if total_col else np.nan
 
         sexo   = row.get(sexo_col,  np.nan) if sexo_col  else np.nan
@@ -441,6 +443,8 @@ def normalizar_tde(df, fase, periodo, monitor="", coord="", arquivo_id="", perio
             "aluno_id":               aluno_id,
             "matricula":              mat,
             "escola":                 escola,
+            "serie":                  serie,
+            "turma_letra":            turma_letra,
             "turma":                  turma,
             "fase":                   fase,
             "periodo":                periodo,
@@ -788,7 +792,7 @@ else:
 
 # ── Dados Socioeconômicos consolidados ──
 socio_cols = [
-    "aluno_id", "escola", "turma", "fase", "ano_semestre",
+    "aluno_id", "escola", "serie", "turma_letra", "turma", "fase", "ano_semestre",
     "sexo", "data_nascimento", "idade", "cor_raca",
     "zona", "necessidade_deficiencia", "responsavel_legal",
     "arquivo_id", "linha_origem",
