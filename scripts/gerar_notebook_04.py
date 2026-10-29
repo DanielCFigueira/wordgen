@@ -25,12 +25,12 @@ def construir_notebook_04():
 ---
 
 ### Objetivos da Etapa 4:
-1. **Perfil Demográfico:** caracterizar a população atendida com base na dimensão `dim_aluno` (sexo, faixa etária, cor/raça, zona e necessidade especial).
-2. **Contextualização Territorial:** analisar a distribuição espacial e institucional (zona rural vs. urbana, distorção idade-série por escola).
-3. **Desempenho e Effect Size por Subgrupos:** verificar se a intervenção atua com equidade, comparando o impacto entre meninos e meninas, faixas etárias e grupos raciais.
-4. **Análise de Fechamento de Gaps (Gap Closure):** investigar se a disparidade de desempenho entre alunos da zona rural e urbana diminuiu ao longo da intervenção.
-5. **Inclusão Escolar:** examinar a participação e a resposta à intervenção dos estudantes com necessidades educacionais especiais.
-6. **Exportação Analítica:** gerar os conjuntos `perfil_socioeconomico_desempenho.parquet` e `metricas_equidade.parquet` em `data/analytics/`.
+1. **Perfil Demográfico:** caracterizar a população estudantil catalogada na dimensão `dim_aluno` (sexo, faixa etária, cor/raça, zona residencial e necessidades especiais).
+2. **Cobertura Socioeconômica:** documentar com transparência a cobertura dos dados demográficos em relação aos testes aplicados (94.76% de correspondência; 140 estudantes mantidos nas análises de desempenho sob categoria não informada).
+3. **Desempenho e Effect Size por Subgrupos:** avaliar a evolução das pontuações em recortes de gênero e faixa etária, reportando tanto amostras completas (>=80% itens) quanto o total de pares válidos.
+4. **Equidade Territorial (Zona Rural vs. Urbana):** quantificar a evolução do gap de pontuação ($Gap = Urbana - Rural$; $\\Delta Gap = Gap_{pós} - Gap_{pré}$), investigando padrões de convergência observados.
+5. **Inclusão Escolar:** analisar o acompanhamento dos 66 estudantes com necessidades educacionais especiais registradas, preservando o rigor conceitual da categoria `NAO_REGISTRADO` (ausência de registro formal, não confirmação de ausência de necessidade).
+6. **Exportação Analítica:** gerar os arquivos consolidados `perfil_socioeconomico_desempenho.parquet` e `metricas_equidade.parquet` em `data/analytics/`.
 """)
 
     # -------------------------------------------------------------
@@ -64,17 +64,23 @@ df_aluno = pd.read_parquet(DATA_FINAL / 'dim_aluno.parquet')
 df_pv = pd.read_parquet(DATA_FINAL / 'pareado_vocabulario.parquet')
 df_pt = pd.read_parquet(DATA_FINAL / 'pareado_tde.parquet')
 
-# Merge com dados demográficos
+# Merge com dados demográficos (preservando estudantes sem correspondência)
 df_v_socio = df_pv.merge(df_aluno, on='aluno_id', how='left')
 df_t_socio = df_pt.merge(df_aluno, on='aluno_id', how='left')
+
+# Preenchimento explícito de nulos para categorias socioeconômicas
+cols_socio = ['sexo', 'faixa_etaria', 'cor_raca', 'zona', 'necessidade_especial']
+for col in cols_socio:
+    df_v_socio[col] = df_v_socio[col].fillna('NAO INFORMADA' if col != 'necessidade_especial' else 'NAO_REGISTRADO')
+    df_t_socio[col] = df_t_socio[col].fillna('NAO INFORMADA' if col != 'necessidade_especial' else 'NAO_REGISTRADO')
 
 # Cálculo dos ganhos individuais
 df_v_socio['ganho'] = df_v_socio['total_pos'] - df_v_socio['total_pre']
 df_t_socio['ganho'] = df_t_socio['total_pos'] - df_t_socio['total_pre']
 
 print(f"Alunos na dim_aluno: {len(df_aluno):,}")
-print(f"Pares Vocabulário com perfil demográfico: {df_v_socio['sexo'].notna().sum():,} de {len(df_v_socio):,} ({100*df_v_socio['sexo'].notna().mean():.1f}%)")
-print(f"Pares TDE II com perfil demográfico:      {df_t_socio['sexo'].notna().sum():,} de {len(df_t_socio):,} ({100*df_t_socio['sexo'].notna().mean():.1f}%)")
+print(f"Pares Vocabulário com perfil demográfico: {(df_v_socio['sexo'] != 'NAO INFORMADA').sum():,} de {len(df_v_socio):,} ({100*(df_v_socio['sexo'] != 'NAO INFORMADA').mean():.1f}%)")
+print(f"Pares TDE II com perfil demográfico:      {(df_t_socio['sexo'] != 'NAO INFORMADA').sum():,} de {len(df_t_socio):,} ({100*(df_t_socio['sexo'] != 'NAO INFORMADA').mean():.1f}%)")
 """)
 
     # -------------------------------------------------------------
@@ -83,7 +89,7 @@ print(f"Pares TDE II com perfil demográfico:      {df_t_socio['sexo'].notna().s
     nb.add_markdown("""
 ## Bloco 2: Perfil Sociodemográfico da População Atendida (`dim_aluno`)
 
-Apresentamos a distribuição univariada dos 2.530 estudantes catalogados na dimensão socioeconômica.
+Apresentamos a distribuição univariada dos 2.530 estudantes catalogados na dimensão socioeconômica e a auditoria de cobertura dos 2.670 estudantes únicos presentes nos testes.
 """)
 
     nb.add_code("""
@@ -173,47 +179,49 @@ plt.show()
     nb.add_markdown("""
 ## Bloco 3: Desempenho e Effect Size por Sexo e Faixa Etária
 
-Avaliamos se o impacto da intervenção difere entre estudantes do sexo feminino e masculino, e entre estudantes de diferentes faixas etárias.
+Avaliamos as pontuações e o effect size pareado ($d_z$) por subgrupo demográfico.
+Documentamos formalmente os resultados para a amostra de avaliações completas (padrão de referência) e também para o total de pares válidos.
 """)
 
     nb.add_code("""
-def calcular_efeito_por_subgrupo(df, col_subgrupo, nome_instrumento, min_n=20):
+def calcular_efeito_por_subgrupo(df, col_subgrupo, nome_instrumento, min_n=15):
     registros = []
     
     for (fase, grp), dados in df.groupby(['fase', col_subgrupo]):
-        # Apenas pares completos para maior rigor
-        completos = dados[dados['completo_pre'] & dados['completo_pos']]
-        n = len(completos)
-        
-        if n < min_n:
-            continue
+        for apenas_comp in [True, False]:
+            sub = dados[dados['completo_pre'] & dados['completo_pos']] if apenas_comp else dados
+            n = len(sub)
             
-        pre = completos['total_pre']
-        pos = completos['total_pos']
-        diff = pos - pre
-        
-        d_medio = diff.mean()
-        s_d = diff.std()
-        dz = d_medio / s_d if s_d > 0 else 0.0
-        se_dz = np.sqrt(1.0/n + (dz**2)/(2.0*n))
-        
-        t_stat, p_val = stats.ttest_rel(pos, pre)
-        
-        registros.append({
-            'Instrumento': nome_instrumento,
-            'Fase': f"Fase {fase}",
-            'Dimensao': col_subgrupo,
-            'Subgrupo': str(grp),
-            'N Pares': n,
-            'Média Pré': round(pre.mean(), 2),
-            'Média Pós': round(pos.mean(), 2),
-            'Ganho Médio': round(d_medio, 2),
-            's_D': round(s_d, 2),
-            'd_z': round(dz, 3),
-            'IC 95% Inf': round(dz - 1.96 * se_dz, 3),
-            'IC 95% Sup': round(dz + 1.96 * se_dz, 3),
-            'p-valor (t)': "< 0.001" if p_val < 0.001 else f"{p_val:.4f}",
-        })
+            if n < min_n:
+                continue
+                
+            pre = sub['total_pre']
+            pos = sub['total_pos']
+            diff = pos - pre
+            
+            d_medio = diff.mean()
+            s_d = diff.std()
+            dz = d_medio / s_d if s_d > 0 else 0.0
+            se_dz = np.sqrt(1.0/n + (dz**2)/(2.0*n))
+            
+            t_stat, p_val = stats.ttest_rel(pos, pre)
+            
+            registros.append({
+                'Instrumento': nome_instrumento,
+                'Fase': f"Fase {fase}",
+                'Dimensao': col_subgrupo,
+                'Subgrupo': str(grp),
+                'Criterio_Amostra': 'Completas (>=80%)' if apenas_comp else 'Todos os Pares Válidos',
+                'N Pares': n,
+                'Média Pré': round(pre.mean(), 2),
+                'Média Pós': round(pos.mean(), 2),
+                'Ganho Médio': round(d_medio, 2),
+                's_D': round(s_d, 2),
+                'd_z': round(dz, 3),
+                'IC 95% Inf': round(dz - 1.96 * se_dz, 3),
+                'IC 95% Sup': round(dz + 1.96 * se_dz, 3),
+                'p-valor (t)': "< 0.001" if p_val < 0.001 else f"{p_val:.4f}",
+            })
         
     return pd.DataFrame(registros)
 
@@ -222,7 +230,7 @@ efeito_sexo_t = calcular_efeito_por_subgrupo(df_t_socio, 'sexo', 'TDE II')
 
 tabela_sexo = pd.concat([efeito_sexo_v, efeito_sexo_t], ignore_index=True)
 print("=== EFFECT SIZE POR SEXO (MENINOS VS. MENINAS) ===")
-display(tabela_sexo[['Instrumento', 'Fase', 'Subgrupo', 'N Pares', 'Média Pré', 'Média Pós', 'Ganho Médio', 'd_z', 'p-valor (t)']])
+display(tabela_sexo[['Instrumento', 'Fase', 'Subgrupo', 'Criterio_Amostra', 'N Pares', 'Média Pré', 'Média Pós', 'Ganho Médio', 'd_z', 'p-valor (t)']])
 """)
 
     nb.add_markdown("""
@@ -235,23 +243,25 @@ efeito_idade_t = calcular_efeito_por_subgrupo(df_t_socio, 'faixa_etaria', 'TDE I
 
 tabela_idade = pd.concat([efeito_idade_v, efeito_idade_t], ignore_index=True)
 print("=== EFFECT SIZE POR FAIXA ETÁRIA ===")
-display(tabela_idade[['Instrumento', 'Fase', 'Subgrupo', 'N Pares', 'Média Pré', 'Média Pós', 'Ganho Médio', 'd_z']])
+display(tabela_idade[tabela_idade['Criterio_Amostra'] == 'Completas (>=80%)'][['Instrumento', 'Fase', 'Subgrupo', 'N Pares', 'Média Pré', 'Média Pós', 'Ganho Médio', 'd_z']])
 """)
 
     # -------------------------------------------------------------
     # Bloco 4: Equidade Geográfica (Rural vs Urbana) e Racial
     # -------------------------------------------------------------
     nb.add_markdown("""
-## Bloco 4: Equidade Territorial (Zona Rural vs. Urbana) e Análise de Gap Closure
+## Bloco 4: Equidade Territorial (Zona Rural vs. Urbana) e Análise de Disparidades
 
-Investigamos se a disparidade de desempenho entre alunos de escolas rurais e urbanas se reduziu após a intervenção pedagógica WordGen.
+Investigamos a diferença observada de pontuação entre estudantes de escolas rurais e urbanas:
 
-Definimos o **Gap Urbano-Rural** no pré e pós-teste como:
 $$Gap_{pré} = \\bar{Y}_{pré, \\, urbana} - \\bar{Y}_{pré, \\, rural}$$
 $$Gap_{pós} = \\bar{Y}_{pós, \\, urbana} - \\bar{Y}_{pós, \\, rural}$$
 $$\\Delta Gap = Gap_{pós} - Gap_{pré}$$
 
-Se $\\Delta Gap < 0$, houve **fechamento da disparidade** (convergência de equidade).
+- $\\Delta Gap < 0$: indica redução da disparidade entre as zonas na amostra e fase analisadas.
+- $\\Delta Gap > 0$: indica aumento da disparidade.
+
+*Rigor interpretativo:* a redução observada da diferença de pontuação reflete que os estudantes da zona rural apresentaram ganhos médios superiores aos dos estudantes urbanos no período avaliado. Essa evidência descritiva não deve ser extrapolada como comprovação causal estrita de eficácia isolada do programa.
 """)
 
     nb.add_code("""
@@ -259,40 +269,49 @@ def analisar_gap_territorial(df_socio, nome_instrumento):
     linhas = []
     
     for fase in sorted(df_socio['fase'].unique()):
-        sub = df_socio[(df_socio['fase'] == fase) & (df_socio['completo_pre']) & (df_socio['completo_pos'])]
-        
-        urb = sub[sub['zona'] == 'URBANA']
-        rur = sub[sub['zona'] == 'RURAL']
-        
-        if len(urb) < 10 or len(rur) < 10:
-            continue
+        for apenas_comp in [True, False]:
+            sub = df_socio[df_socio['fase'] == fase]
+            if apenas_comp:
+                sub = sub[sub['completo_pre'] & sub['completo_pos']]
+                
+            urb = sub[sub['zona'] == 'URBANA']
+            rur = sub[sub['zona'] == 'RURAL']
             
-        pre_urb, pos_urb = urb['total_pre'].mean(), urb['total_pos'].mean()
-        pre_rur, pos_rur = rur['total_pre'].mean(), rur['total_pos'].mean()
-        
-        gap_pre = pre_urb - pre_rur
-        gap_pos = pos_urb - pos_rur
-        delta_gap = gap_pos - gap_pre
-        
-        ganho_urb = pos_urb - pre_urb
-        ganho_rur = pos_rur - pre_rur
-        
-        linhas.append({
-            'Instrumento': nome_instrumento,
-            'Fase': f"Fase {fase}",
-            'N Urbana': len(urb),
-            'N Rural': len(rur),
-            'Pré Urbana': round(pre_urb, 2),
-            'Pré Rural': round(pre_rur, 2),
-            'Gap Pré (U - R)': round(gap_pre, 2),
-            'Pós Urbana': round(pos_urb, 2),
-            'Pós Rural': round(pos_rur, 2),
-            'Gap Pós (U - R)': round(gap_pos, 2),
-            'Delta Gap': round(delta_gap, 2),
-            'Ganho Médio Rural': round(ganho_rur, 2),
-            'Ganho Médio Urbano': round(ganho_urb, 2),
-            'Diagnóstico Equidade': 'Redução da Disparidade (Equidade +)' if delta_gap < -0.1 else ('Aumento da Disparidade' if delta_gap > 0.1 else 'Disparidade Mantida'),
-        })
+            if len(urb) < 10 or len(rur) < 10:
+                continue
+                
+            pre_urb, pos_urb = urb['total_pre'].mean(), urb['total_pos'].mean()
+            pre_rur, pos_rur = rur['total_pre'].mean(), rur['total_pos'].mean()
+            
+            gap_pre = pre_urb - pre_rur
+            gap_pos = pos_urb - pos_rur
+            delta_gap = gap_pos - gap_pre
+            
+            ganho_urb = pos_urb - pre_urb
+            ganho_rur = pos_rur - pre_rur
+            
+            diag = (
+                'Redução da disparidade observada' if delta_gap < -0.1
+                else ('Aumento da disparidade observada' if delta_gap > 0.1 else 'Disparidade estável')
+            )
+            
+            linhas.append({
+                'Instrumento': nome_instrumento,
+                'Fase': f"Fase {fase}",
+                'Critério_Amostra': 'Completas (>=80%)' if apenas_comp else 'Todos os Pares Válidos',
+                'N Urbana': len(urb),
+                'N Rural': len(rur),
+                'Pré Urbana': round(pre_urb, 2),
+                'Pré Rural': round(pre_rur, 2),
+                'Gap Pré (U - R)': round(gap_pre, 2),
+                'Pós Urbana': round(pos_urb, 2),
+                'Pós Rural': round(pos_rur, 2),
+                'Gap Pós (U - R)': round(gap_pos, 2),
+                'Delta Gap': round(delta_gap, 2),
+                'Ganho Médio Rural': round(ganho_rur, 2),
+                'Ganho Médio Urbano': round(ganho_urb, 2),
+                'Diagnóstico': diag,
+            })
         
     return pd.DataFrame(linhas)
 
@@ -300,19 +319,18 @@ gap_v = analisar_gap_territorial(df_v_socio, 'Vocabulário')
 gap_t = analisar_gap_territorial(df_t_socio, 'TDE II')
 
 tabela_gap = pd.concat([gap_v, gap_t], ignore_index=True)
-print("=== ANÁLISE DE EQUIDADE TERRITORIAL E FECHAMENTO DE GAPS (GAP CLOSURE) ===")
+print("=== ANÁLISE DE EQUIDADE TERRITORIAL E FECHAMENTO DE GAPS ===")
 display(tabela_gap)
 """)
 
     nb.add_markdown("""
-### Visualização da Trajetória Urbana vs. Rural e Fechamento de Gap
+### Visualização da Trajetória Urbana vs. Rural
 """)
 
     nb.add_code("""
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
 for i, (nome, df_socio, ax) in enumerate([('Vocabulário', df_v_socio, axes[0]), ('TDE II', df_t_socio, axes[1])]):
-    # Considera Fase 2 e Fase 4
     medias_grafico = []
     for fase in [2, 4]:
         for z, cor, estilo in [('URBANA', 'royalblue', '-o'), ('RURAL', 'forestgreen', '-s')]:
@@ -334,6 +352,8 @@ plt.show()
     # -------------------------------------------------------------
     nb.add_markdown("""
 ## Bloco 5: Análise por Cor / Raça e Inclusão de Alunos com Necessidades Especiais
+
+*Atenção à categoria:* `NAO_REGISTRADO` indica que a informação não constava nos registros administrativos consultados e não deve ser confundida com ausência confirmada de necessidade especial.
 """)
 
     nb.add_code("""
@@ -341,8 +361,8 @@ efeito_raca_v = calcular_efeito_por_subgrupo(df_v_socio, 'cor_raca', 'Vocabulár
 efeito_raca_t = calcular_efeito_por_subgrupo(df_t_socio, 'cor_raca', 'TDE II', min_n=15)
 
 tabela_raca = pd.concat([efeito_raca_v, efeito_raca_t], ignore_index=True)
-print("=== EFFECT SIZE POR COR / RAÇA (N >= 15) ===")
-display(tabela_raca[['Instrumento', 'Fase', 'Subgrupo', 'N Pares', 'Média Pré', 'Média Pós', 'Ganho Médio', 'd_z']])
+print("=== EFFECT SIZE POR COR / RAÇA (N >= 15, AMOSTRAS COMPLETAS) ===")
+display(tabela_raca[tabela_raca['Criterio_Amostra'] == 'Completas (>=80%)'][['Instrumento', 'Fase', 'Subgrupo', 'N Pares', 'Média Pré', 'Média Pós', 'Ganho Médio', 'd_z']])
 """)
 
     nb.add_markdown("""
@@ -358,7 +378,6 @@ def analisar_necessidades_especiais(df_socio, nome_instrumento):
             val_pre = grp['total_pre'].dropna()
             val_pos = grp['total_pos'].dropna()
             
-            # Pares válidos
             pares = grp.dropna(subset=['total_pre', 'total_pos'])
             ganho_m = (pares['total_pos'] - pares['total_pre']).mean() if len(pares) > 0 else np.nan
             
@@ -366,8 +385,8 @@ def analisar_necessidades_especiais(df_socio, nome_instrumento):
                 'Instrumento': nome_instrumento,
                 'Fase': f"Fase {fase}",
                 'Necessidade Especial': ne,
-                'N Total': len(grp),
-                'N Pares': len(pares),
+                'N Total Registros': len(grp),
+                'N Pares Válidos': len(pares),
                 'Média Pré': round(val_pre.mean(), 2) if len(val_pre) > 0 else np.nan,
                 'Média Pós': round(val_pos.mean(), 2) if len(val_pos) > 0 else np.nan,
                 'Ganho Médio': round(ganho_m, 2) if pd.notna(ganho_m) else np.nan,
