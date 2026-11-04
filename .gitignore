@@ -17,6 +17,7 @@ data/
 # Caches
 .ruff_cache/
 .pytest_cache/
+.pytest-audit-*/
 .coverage
 .env
 .streamlit/secrets.toml
@@ -28,3 +29,10 @@ data/
 # Documentos locais com inventario e auditoria legada
 docs/inventario_dados.csv
 docs/auditoria_dados.md
+
+# Modelos treinados (artefatos binários regeneráveis)
+models/
+*.joblib
+
+# Relatórios CSV (artefatos regeneráveis, bloqueados pelo hook de dados)
+reports/modelagem/metricas/
