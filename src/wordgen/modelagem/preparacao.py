@@ -79,7 +79,17 @@ def preparar_base_instrumento(
 
     # 4. Experimento B: Junção com dim_aluno (demográfico e contextual)
     if experimento.upper() == "B":
-        df_valido = df_valido.merge(df_dim_aluno, on="aluno_id", how="left")
+        if df_dim_aluno["aluno_id"].isna().any():
+            raise ValueError("dim_aluno contém aluno_id nulo; a dimensão deve ter chave válida.")
+
+        # Validação explícita de cardinalidade: garante que dim_aluno não possui
+        # duplicatas em aluno_id que possam multiplicar linhas silenciosamente.
+        df_valido = df_valido.merge(
+            df_dim_aluno,
+            on="aluno_id",
+            how="left",
+            validate="many_to_one",
+        )
 
         # Preenchimento de ausências com categorias explícitas de não registro
         df_valido["sexo"] = df_valido["sexo"].fillna("NAO_INFORMADO").astype(str).str.strip()

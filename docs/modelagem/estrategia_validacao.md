@@ -35,9 +35,9 @@ train_idx, test_idx = next(gss.split(X, y, groups=df["aluno_id"].values))
 
 ## 3. Validação Cruzada Agrupada no Treinamento (`GroupKFold`)
 
-Durante a etapa de busca de hiperparâmetros (GridSearchCV), a validação cruzada também foi conduzida com particionamento estrito por grupos (`GroupKFold(n_splits=5)`), impedindo vazamento interno entre os folds de treino e validação.
+Durante a etapa de busca de hiperparâmetros (`GridSearchCV`), a validação cruzada utiliza particionamento estrito por grupos (`GroupKFold(n_splits=5)`). O vetor de grupos de treinamento, derivado de `aluno_id`, é passado explicitamente a `fit(..., groups=groups_train)`. O pré-processamento faz parte do pipeline avaliado em cada fold, portanto imputação, escala e codificação são ajustadas apenas no subconjunto de treino daquele fold. Para o MLP, `early_stopping=False` evita uma divisão interna que não respeitaria os grupos.
 
-O conjunto de teste final de 20% permaneceu completamente intocado e isolado durante toda a fase de busca e ajuste de hiperparâmetros.
+O conjunto de teste final de 20% permanece fora da busca e do ajuste de hiperparâmetros, sendo usado somente na avaliação final. Os grupos do teste são disjuntos dos grupos de treino.
 
 ---
 

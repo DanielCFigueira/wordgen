@@ -1,7 +1,7 @@
 [project]
 name = "wordgen"
 version = "0.1.0"
-description = "Add your description here"
+description = "Análise educacional, modelagem preditiva e assistente RAG do projeto WordGen"
 readme = "README.md"
 authors = [
     { name = "Daniel C. Figueira", email = "danielfigueira1418@gmail.com" }

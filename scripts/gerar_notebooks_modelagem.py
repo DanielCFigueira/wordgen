@@ -148,7 +148,7 @@ Neste notebook, realizamos:
    - `ColumnTransformer` tratando variáveis numéricas (`StandardScaler` para redes neurais, mediana para imputação) e categóricas (`OneHotEncoder`).
 2. **Otimização de Hiperparâmetros via Validação Cruzada Agrupada (`GroupKFold`)**:
    - `RandomForestRegressor` (`n_estimators`, `max_depth`, `min_samples_leaf`).
-   - `MLPRegressor` (`hidden_layer_sizes`, `alpha`, `learning_rate_init`, `early_stopping`).
+   - `MLPRegressor` (`hidden_layer_sizes`, `alpha`, `learning_rate_init`), com `early_stopping=False` e validação agrupada externa.
 3. **Persistência dos modelos finais** via `joblib` e metadados JSON.
 """)
 

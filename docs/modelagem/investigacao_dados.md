@@ -8,7 +8,7 @@ A auditoria dos dados para a etapa de modelagem preditiva examinou as bases cons
 | :--- | :--- | :--- | :--- |
 | `pareado_vocabulario` | Parquet / CSV | 3.418 × 11 | Avaliações pré e pós-teste pareadas de Vocabulário |
 | `pareado_tde` | Parquet / CSV | 3.948 × 11 | Avaliações pré e pós-teste pareadas de TDE II (Escrita) |
-| `dim_aluno` | Parquet / CSV | 2.530 × 7 | Dimensão socioeconômica e demográfica consolidada |
+| `dim_aluno` | Parquet / CSV | 2.530 × 7 | Dimensão demográfica e contextual consolidada |
 | `dataset_vocabulario` | Parquet / CSV | 8.826 × 76 | Base analítica unificada de Vocabulário por aplicação |
 | `dataset_tde` | Parquet / CSV | 9.317 × 66 | Base analítica unificada de TDE II por aplicação |
 
@@ -68,6 +68,8 @@ Distribuição dos pares completos por fase:
 ## 5. Análise de Cobertura e Significado de `dim_aluno`
 
 A dimensão `dim_aluno` possui 2.530 registros com as seguintes características:
+- Auditoria da chave: 2.530 `aluno_id` distintos, sem valores nulos, duplicidades ou conflitos entre linhas com a mesma chave.
+- Os merges `left` das bases pareadas com a dimensão, validados como `many_to_one`, preservam as 3.418 linhas de Vocabulário e as 3.948 linhas de TDE II. Há estudantes sem correspondência; eles permanecem na amostra e recebem categorias de ausência no Experimento B.
 - **Cobertura nos Pares Completos de Vocabulário**: 3.289 de 3.320 linhas (99,07% de cobertura). Apenas 30 estudantes únicos não constam no cadastro demográfico.
 - **Cobertura nos Pares Completos de TDE II**: 3.774 de 3.796 linhas (99,42% de cobertura). Apenas 22 estudantes únicos não constam no cadastro demográfico.
 
@@ -77,7 +79,7 @@ A dimensão `dim_aluno` possui 2.530 registros com as seguintes características
 - `cor_raca`: Demográfico (PARDA: 1.803; NAO INFORMADO: 403; BRANCA: 244; INDÍGENA: 66; PRETA: 10; AMARELA: 4).
 - `zona`: Territorial/Contextual (URBANA: 1.286; RURAL: 933; NAO INFORMADA: 311).
 - `necessidade_especial`: Educacional/Inclusão (NAO_REGISTRADO: 2.464; SIM: 66).
-  > **Nota Técnica:** `NAO_REGISTRADO` reflete ausência de laudo cadastral nos registros municipais, não confirmando ausência médica.
+  > **Nota Técnica:** o pipeline marca `SIM` quando encontra registro em `necessidade_deficiencia`; `NAO_REGISTRADO` significa que não encontrou esse registro, e não confirma ausência de deficiência.
 - `fonte_socio`: Metadado técnico de engenharia de dados (indica a pasta/arquivo de origem). **Excluída das features de modelagem**.
 - `responsavel_legal`: Dado pessoal identificável (PII). **Estritamente excluído por privacidade e ética**.
 

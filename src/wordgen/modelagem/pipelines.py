@@ -86,16 +86,26 @@ def criar_pipeline_mlp(
     mlp_params: dict | None = None,
     random_state: int = 42,
 ) -> Pipeline:
-    """Constrói o pipeline Scikit-learn completo para a Rede Neural Artificial (MLPRegressor)."""
+    """Constrói o pipeline Scikit-learn completo para a Rede Neural Artificial (MLPRegressor).
+
+    Nota: `early_stopping` está desabilitado intencionalmente.
+    O MLPRegressor com `early_stopping=True` realiza uma divisão interna aleatória
+    do conjunto de treinamento para validação, sem considerar o agrupamento por
+    `aluno_id`. Isso conflita com a estratégia de validação agrupada adotada no
+    projeto e pode causar vazamento de dados por estudante na etapa interna do MLP.
+    A regularização é controlada exclusivamente via `alpha` (L2) e a parada é
+    definida por `max_iter`, suficiente para convergência com os dados disponíveis.
+    A seleção de hiperparâmetros é conduzida por `GroupKFold` externo no GridSearchCV.
+    """
     params = {
         "hidden_layer_sizes": (64, 32),
         "activation": "relu",
         "solver": "adam",
         "alpha": 0.01,
         "learning_rate_init": 0.005,
-        "max_iter": 500,
-        "early_stopping": True,
-        "validation_fraction": 0.1,
+        "max_iter": 1000,
+        "early_stopping": False,
+        "tol": 1e-4,
         "random_state": random_state,
     }
     if mlp_params:

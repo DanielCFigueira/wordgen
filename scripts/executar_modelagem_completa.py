@@ -40,13 +40,13 @@ def executar_pipeline():
     cenarios = [
         ("Vocabulário — Experimento A (Acadêmico)", "vocabulario_exp_a", "Vocabulário", "A"),
         (
-            "Vocabulário — Experimento B (Acadêmico + Demográfico)",
+            "Vocabulário — Experimento B (Acadêmico + Demográfico/Contextual)",
             "vocabulario_exp_b",
             "Vocabulário",
             "B",
         ),
         ("TDE II — Experimento A (Acadêmico)", "tde_exp_a", "TDE II", "A"),
-        ("TDE II — Experimento B (Acadêmico + Demográfico)", "tde_exp_b", "TDE II", "B"),
+        ("TDE II — Experimento B (Acadêmico + Demográfico/Contextual)", "tde_exp_b", "TDE II", "B"),
     ]
 
     todos_resultados = []

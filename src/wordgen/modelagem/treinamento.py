@@ -72,8 +72,8 @@ def treinar_e_otimizar_mlp(
 
     param_grid = {
         "regressor__hidden_layer_sizes": [(64, 32), (32, 16), (64,)],
-        "regressor__alpha": [0.001, 0.01, 0.1],
-        "regressor__learning_rate_init": [0.005, 0.01],
+        "regressor__alpha": [0.01, 0.1, 0.5, 1.0],
+        "regressor__learning_rate_init": [0.001, 0.005, 0.01],
     }
 
     gkf = obter_cv_agrupado(n_splits=cv_splits)

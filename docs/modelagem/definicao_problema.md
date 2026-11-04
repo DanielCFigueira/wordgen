@@ -8,13 +8,13 @@ Cada instrumento possui avaliações de pré-teste e pós-teste, permitindo obse
 
 Embora a etapa de Análise de Dados permita compreender o comportamento histórico dos resultados, existe a oportunidade de avançar para uma abordagem preditiva.
 
-A proposta é utilizar técnicas de Machine Learning para estimar a evolução do desempenho dos alunos, considerando seu desempenho anterior, informações acadêmicas e características socioeconômicas disponíveis.
+A proposta é utilizar técnicas de Machine Learning para estimar a evolução do desempenho dos alunos, considerando seu desempenho anterior, informações acadêmicas e características demográficas e contextuais disponíveis.
 
 Dessa forma, pretende-se complementar as análises descritivas, estatísticas e longitudinais com uma perspectiva preditiva, contribuindo para o acompanhamento do desempenho acadêmico.
 
 ## 2. Objetivo da Modelagem
 
-Desenvolver modelos de Machine Learning capazes de prever a evolução do desempenho acadêmico dos alunos nas avaliações de Vocabulário e TDE II, utilizando informações de desempenho anterior, características acadêmicas e características socioeconômicas disponíveis antes da avaliação.
+Desenvolver modelos de Machine Learning capazes de prever o ganho dos alunos nas avaliações de Vocabulário e TDE II utilizando informações de desempenho anterior e características acadêmicas. O Experimento B explora adicionalmente variáveis demográficas/contextuais de `dim_aluno`, sem comprovação da disponibilidade temporal individual desses atributos.
 
 A modelagem terá como objetivo estimar a variação da pontuação entre o pré-teste e o pós-teste, permitindo identificar padrões associados à evolução do desempenho dos alunos e complementar as análises descritivas, estatísticas e longitudinais realizadas no projeto WordGen.
 
@@ -22,7 +22,7 @@ A modelagem terá como objetivo estimar a variação da pontuação entre o pré
 
 - Desenvolver modelos preditivos independentes para os instrumentos de Vocabulário e TDE II.
 - Investigar a relação entre o desempenho no pré-teste e a evolução da pontuação.
-- Avaliar a contribuição das características acadêmicas e socioeconômicas disponíveis para as previsões.
+- Avaliar a contribuição das características acadêmicas e demográficas/contextuais disponíveis para as previsões.
 - Comparar o desempenho de diferentes algoritmos de regressão.
 - Avaliar a capacidade preditiva dos modelos por meio de métricas apropriadas.
 - Disponibilizar resultados que possam complementar os indicadores e visualizações do dashboard.
@@ -52,43 +52,41 @@ Somente registros com pontuações válidas de pré-teste e pós-teste poderão 
 
 ## 4. Definição das Variáveis Preditoras (Features)
 
-As variáveis preditoras serão compostas por informações de desempenho anterior, características acadêmicas e características socioeconômicas disponíveis antes da realização do pós-teste.
+As variáveis abaixo distinguem o que existe nas bases do que foi efetivamente selecionado pelos pipelines. Os quatro pipelines usam `total_pre` como único preditor numérico; itens individuais e atributos do pós-teste não são usados.
 
-As variáveis serão organizadas nos seguintes grupos:
+### 4.1. Variáveis efetivamente utilizadas
 
-### 4.1. Desempenho anterior
+**Experimento A — cenário acadêmico principal**, em cada instrumento:
+- Numérica: `total_pre`.
+- Categóricas: `fase`, `escola`, `serie` e `turma`.
 
-- Pontuação total do pré-teste.
-- Pontuações individuais dos itens do pré-teste, quando disponíveis e consideradas relevantes.
+**Experimento B — exploratório complementar**, em cada instrumento, utiliza as mesmas variáveis do A e acrescenta `sexo`, `faixa_etaria`, `cor_raca`, `zona` e `necessidade_especial`.
 
-### 4.2. Informações acadêmicas
+### 4.2. Variáveis disponíveis, mas não utilizadas
 
-- Fase da avaliação.
-- Série/ano escolar.
-- Turma.
-- Escola, quando sua utilização for metodologicamente adequada.
-- Outras informações acadêmicas disponíveis e consistentes.
+As bases pareadas contêm pontuações por item, totais e informações dos dois momentos. Os itens individuais do pré-teste não entram nos pipelines. `total_pos`, `ganho` e medidas derivadas do pós-teste são excluídos das preditoras. A disponibilidade de uma coluna na base não significa que ela foi utilizada.
 
-### 4.3. Características socioeconômicas
+### 4.3. Características demográficas e contextuais
 
-- Escolaridade dos responsáveis.
-- Composição familiar.
-- Outras características socioeconômicas disponíveis na base.
+As variáveis demográficas e contextuais disponíveis na dimensão `dim_aluno` são:
+- `sexo`: gênero autodeclarado do estudante.
+- `faixa_etaria`: faixa etária do estudante.
+- `cor_raca`: classificação étnico-racial autodeclarada.
+- `zona`: localização territorial (URBANA / RURAL).
+- `necessidade_especial`: indicador de inclusão educacional.
 
-Como as informações socioeconômicas não estão disponíveis de maneira comparável em todas as fases, serão realizados experimentos separados:
+> **Nota**: essas variáveis são de natureza **demográfica e contextual**, não estritamente socioeconômica. Variáveis tipicamente socioeconômicas (como renda familiar, escolaridade dos responsáveis e composição familiar) não estão disponíveis de forma confiável na base de dados.
 
-- Modelo acadêmico: utilizará informações de desempenho anterior e características acadêmicas comparáveis.
-- Modelo acadêmico e socioeconômico: incluirá características socioeconômicas e será treinado apenas com registros que possuam essas informações de maneira comparável.
+Como as informações demográficas não estão disponíveis para todos os estudantes, os ausentes são tratados com categoria explícita `NAO_INFORMADO`, sem descartar registros. Dois experimentos são conduzidos:
 
-### 4.4. Variáveis temporais e de contexto
+- Modelo acadêmico: utilizará informações de desempenho anterior e características acadêmicas.
+- Modelo acadêmico e demográfico/contextual: adicionará as características demográficas e contextuais disponíveis.
 
-- Fase da avaliação.
-- Momento da avaliação, quando disponível.
-- Intervalo entre pré-teste e pós-teste, caso esteja registrado de forma confiável.
+**Limitação temporal do Experimento B**: `dim_aluno` consolida atributos de múltiplas fases e não registra a fase de origem de cada campo. Não está comprovado que todos os atributos demográficos/contextuais estavam disponíveis no momento da previsão. O Experimento B é exploratório; uma versão futura deve reconstruir essas características por fase e no momento da previsão.
 
-### 4.5. Restrições na seleção das features
+### 4.4. Restrições na seleção das features
 
-As variáveis preditoras deverão representar informações disponíveis no momento da previsão, definido como o período posterior à realização do pré-teste e anterior à realização do pós-teste.
+`total_pre` e as características acadêmicas são usados como preditores conforme os pipelines. A disponibilidade temporal individual de cada atributo de `dim_aluno` não está comprovada.
 
 Não serão utilizadas informações provenientes do pós-teste, da variável-alvo ou de indicadores calculados com informações futuras, evitando vazamento de dados (Data Leakage).
 
@@ -113,8 +111,8 @@ A modelagem será realizada separadamente para os instrumentos Vocabulário e TD
 
 Para cada instrumento, serão conduzidos dois experimentos:
 
-- Experimento acadêmico: utilizará variáveis de desempenho anterior e informações acadêmicas comparáveis.
-- Experimento acadêmico e socioeconômico: incluirá características socioeconômicas disponíveis de maneira comparável, inicialmente restrito aos registros da Fase 2.
+- **Experimento A — acadêmico (principal)**: `total_pre`, `fase`, `escola`, `serie` e `turma`.
+- **Experimento B — acadêmico + demográfico/contextual (exploratório)**: mesmas variáveis do A, acrescidas de `sexo`, `faixa_etaria`, `cor_raca`, `zona` e `necessidade_especial`. A disponibilidade temporal individual dessas características não está comprovada; uma versão futura deverá reconstruí-las por fase e momento da previsão.
 
 Os dois algoritmos serão avaliados em cada experimento, permitindo comparar seus resultados.
 

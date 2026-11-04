@@ -17,6 +17,7 @@ data/
 # Caches
 .ruff_cache/
 .pytest_cache/
+.pytest-audit-*/
 .coverage
 .env
 .streamlit/secrets.toml
