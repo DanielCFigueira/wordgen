@@ -98,6 +98,38 @@ def test_orquestrador_recusa_identificadores_individuais() -> None:
     assert not resposta.fontes
 
 
+@pytest.mark.parametrize(
+    "pergunta",
+    [
+        "Analise o estudante ALUNO_0123456789ABCDEF no WordGen.",
+        "Considere o contato estudante@example.org na análise WordGen.",
+        "Considere o documento 123.456.789-09 no WordGen.",
+        "Considere o telefone (91) 99999-9999 no WordGen.",
+    ],
+)
+def test_orquestrador_bloqueia_valores_pessoais_antes_do_llm(pergunta: str) -> None:
+    resposta = construir_agente().responder(pergunta, usar_llm=False)
+    assert resposta.rota == "privacidade"
+    assert not resposta.fontes
+
+
+def test_configuracao_aceita_diretorios_privados_de_producao(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dados = tmp_path / "dados"
+    runtime = tmp_path / "runtime"
+    relatorios = tmp_path / "relatorios"
+    monkeypatch.setenv("WORDGEN_DATA_DIR", str(dados))
+    monkeypatch.setenv("WORDGEN_RUNTIME_DIR", str(runtime))
+    monkeypatch.setenv("WORDGEN_REPORTS_DIR", str(relatorios))
+    configuracao = ConfiguracaoAgente()
+    assert configuracao.base_conhecimento == dados / "rag" / "base_conhecimento_wordgen.json"
+    assert configuracao.indice_vetorial == runtime / "rag" / "indice_tfidf_wordgen.joblib"
+    assert configuracao.metricas_modelagem == (
+        relatorios / "modelagem" / "metricas" / "metricas_comparativas_gerais.csv"
+    )
+
+
 def test_orquestrador_responde_rag_sem_credencial(monkeypatch: pytest.MonkeyPatch) -> None:
     resposta = construir_agente().responder("O que é Cohen's dz?", usar_llm=False)
     assert resposta.rota == "rag_extrativo"

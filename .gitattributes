@@ -2,3 +2,10 @@
 *.csv -text
 *.parquet binary
 .env export-ignore
+.streamlit/secrets.toml export-ignore
+data/** export-ignore
+models/** export-ignore
+reports/modelagem/metricas/** export-ignore
+reports/modelagem/graficos/efeito_regressao_media.png export-ignore
+reports/modelagem/graficos/real_vs_previsto_vocabulario.png export-ignore
+reports/modelagem/graficos/real_vs_previsto_tde.png export-ignore

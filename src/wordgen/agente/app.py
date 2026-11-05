@@ -48,8 +48,9 @@ def renderizar_assistente(exibir_sidebar: bool = False) -> None:
 
     try:
         agente = _obter_agente()
-    except (FileNotFoundError, ValueError) as erro:
+    except (FileNotFoundError, OSError, ValueError) as erro:
         st.error(f"Não foi possível preparar a base de conhecimento: {erro}")
+        st.info("Confirme os artefatos privados configurados para a aplicação e tente novamente.")
         st.stop()
 
     for pergunta, resposta in st.session_state.historico_agente:

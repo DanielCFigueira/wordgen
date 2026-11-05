@@ -2,7 +2,7 @@
 
 Pipeline de Engenharia e Mineração de Dados do Projeto WordGen, desenvolvido para a disciplina de Inteligência Artificial da Universidade Federal do Pará (UFPA).
 
-O objetivo deste pipeline é consolidar, higienizar, deduplicar determinísticamente e anonimizar as avaliações educacionais psicométricas de **Vocabulário** e **TDE II (Subteste de Escrita)**, juntamente com metadados socioeconômicos dos estudantes (Fases 2, 3 e 4).
+O objetivo deste pipeline é consolidar, higienizar, deduplicar determinísticamente e **pseudonimizar/minimizar** as avaliações educacionais psicométricas de **Vocabulário** e **TDE II (Subteste de Escrita)**, juntamente com metadados demográficos e contextuais dos estudantes (Fases 2, 3 e 4).
 
 ---
 
@@ -20,7 +20,7 @@ Os arquivos finais estão disponíveis nos formatos CSV (codificação UTF-8 com
 | `relatorio_qualidade.md` | Relatório executivo completo de métricas estatísticas agregadas e validações. | Documento Markdown |
 
 > [!NOTE]
-> Os datasets de avaliação não contêm dados pessoais identificáveis (LGPD/privacidade). Todos os atributos demográficos minimizados estão concentrados em `dim_aluno`.
+> Os datasets finais não contêm nomes, matrículas, contatos, datas de nascimento ou responsáveis. Contudo, `aluno_id` é um identificador pseudonimizado e, combinado a atributos de contexto, continua sujeito a controles de acesso e à LGPD; não é uma garantia de anonimização absoluta.
 
 ---
 
@@ -52,7 +52,7 @@ Os comparativos demográficos são descritivos, não causais. As pontuações de
 - **Erro de estrutura ou escala:** não altere os CSVs no dashboard; revise a etapa de geração que produziu a base final.
 - **Página de modelagem sem resultados:** confirme a presença de `reports/modelagem/metricas/metricas_comparativas_gerais.csv` e dos JSONs em `models/modelagem/`.
 
-Arquivos `.env` são locais, estão ignorados pelo Git e não devem ser incluídos em ZIPs ou outras distribuições. Use apenas valores vazios ou fictícios em `.env.example`.
+Arquivos `.env` são locais, estão ignorados pelo Git e não devem ser incluídos em ZIPs, imagens ou outras distribuições. Use apenas valores vazios ou fictícios em `.env.example`.
 
 ### Assistente RAG + LLM
 
@@ -74,7 +74,7 @@ Inicie o dashboard e acesse a página **Assistente analítico** na mesma navega�
 uv run streamlit run src/wordgen/dashboard/app.py
 ```
 
-O dashboard e o assistente estarão disponíveis em `http://localhost:8501`. O assistente mantém o histórico apenas durante a sessão, exibe as fontes usadas e bloqueia pedidos por identificadores ou registros individuais. Perguntas fora do escopo do WordGen são recusadas antes da recuperação; se não houver evidência suficiente, o agente o informa sem responder com o panorama geral. Não é uma ferramenta validada para decisão pedagógica; os resultados de modelagem e atributos contextuais conservam as limitações metodológicas documentadas no projeto.
+O dashboard e o assistente estarão disponíveis em `http://localhost:8501`. O assistente mantém o histórico apenas durante a sessão, exibe as fontes usadas e bloqueia pedidos por identificadores ou registros individuais. Ele também recusa formatos de identificador pseudonimizado, e-mail, CPF e telefone antes de qualquer chamada ao Groq. Perguntas fora do escopo do WordGen são recusadas antes da recuperação; se não houver evidência suficiente, o agente o informa sem responder com o panorama geral. Não é uma ferramenta validada para decisão pedagógica; os resultados de modelagem e atributos contextuais conservam as limitações metodológicas documentadas no projeto.
 
 Para executar somente a interface do agente em paralelo ao dashboard, use uma porta distinta:
 
@@ -148,3 +148,74 @@ uv run ruff format --check .
   publicar dados educacionais. O hook também remove saídas de notebooks antes do commit, sem
   depender de caminhos absolutos da máquina. Instale os hooks com
   `uv run pre-commit install` após `uv sync`.
+
+## Publicação em produção
+
+O repositório e a imagem Docker **não incluem dados educacionais, modelos, relatórios de métricas,
+índices RAG ou credenciais**. O serviço deve executar como usuário não privilegiado e receber
+somente os artefatos aprovados por volume privado ou armazenamento autenticado. Não publique uma
+imagem com `data/raw/`, `data/processed/`, `data/legado/` ou qualquer arquivo com registros por
+estudante.
+
+### Artefatos privados necessários
+
+Monte os diretórios abaixo no servidor. Os cinco CSVs de `final/` são necessários para as páginas
+analíticas; os demais habilitam páginas complementares e o assistente.
+
+```text
+<dados>/final/dataset_vocabulario.csv
+<dados>/final/dataset_tde.csv
+<dados>/final/pareado_vocabulario.csv
+<dados>/final/pareado_tde.csv
+<dados>/final/dim_aluno.csv
+<dados>/analytics/dashboard_kpis.csv
+<dados>/analytics/metricas_effect_size.csv
+<dados>/analytics/metricas_longitudinais.csv
+<dados>/analytics/painel_longitudinal.csv
+<dados>/rag/base_conhecimento_wordgen.json
+<relatorios>/modelagem/metricas/metricas_comparativas_gerais.csv
+<modelos>/modelagem/*_metadata.json
+```
+
+`relatorio_qualidade.md`, os CSVs analíticos adicionais e os metadados de modelos são
+complementares: a página correspondente informa a indisponibilidade se não existirem. Os binários
+de modelos `.joblib` não são carregados pela aplicação web e não devem ser montados sem uma
+necessidade operacional específica. O índice TF-IDF é reconstruível; mantenha um diretório
+gravável separado para o cache.
+
+### Variáveis de ambiente
+
+| Variável | Obrigatória | Finalidade |
+|---|---:|---|
+| `WORDGEN_DATA_DIR` | Sim no deploy | Diretório privado com `final/`, `analytics/` e `rag/`. |
+| `WORDGEN_REPORTS_DIR` | Para página de modelagem | Diretório privado com métricas agregadas. |
+| `WORDGEN_MODEL_DIR` | Não | Metadados JSON de modelos. |
+| `WORDGEN_RUNTIME_DIR` | Sim no deploy | Diretório gravável apenas para o índice TF-IDF reconstruível. |
+| `GROQ_API_KEY` | Não | Secret opcional para síntese por LLM. Sem ele, o assistente usa somente recuperação local. |
+| `GROQ_MODEL` | Não | Modelo Groq permitido pela conta; o padrão está em `.env.example`. |
+
+### Container de produção
+
+O projeto inclui um `Dockerfile` para uma plataforma de containers autenticada. A opção mais
+adequada é um serviço privado com autenticação na borda — por exemplo, Cloud Run, ECS/Fargate ou
+equivalente — com os diretórios privados fornecidos por armazenamento restrito e `GROQ_API_KEY`
+injetada pelo gerenciador de secrets da plataforma. Não use hospedagem pública sem autenticação
+para dados educacionais pseudonimizados.
+
+```bash
+docker build -t wordgen:prod .
+docker run --rm -p 8501:8501 \
+  -e WORDGEN_DATA_DIR=/run/wordgen/data \
+  -e WORDGEN_REPORTS_DIR=/run/wordgen/reports \
+  -e WORDGEN_MODEL_DIR=/run/wordgen/models/modelagem \
+  -e WORDGEN_RUNTIME_DIR=/var/lib/wordgen \
+  -v /caminho-privado/dados:/run/wordgen/data:ro \
+  -v /caminho-privado/relatorios:/run/wordgen/reports:ro \
+  -v /caminho-privado/modelos:/run/wordgen/models:ro \
+  -v wordgen-runtime:/var/lib/wordgen \
+  wordgen:prod
+```
+
+Em PowerShell, use crase (`` ` ``) no lugar de `\` para quebrar linhas. Configure a chave Groq
+somente no painel de secrets da plataforma; nunca em argumentos de comando, imagem ou arquivo
+versionado.

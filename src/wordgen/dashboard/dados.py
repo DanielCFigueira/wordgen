@@ -1,6 +1,7 @@
 """Carregamento dos datasets finais e artefatos agregados do WordGen."""
 
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -8,10 +9,12 @@ import pandas as pd
 from wordgen.dashboard.analise import exigir_colunas, normalizar_booleano
 
 ROOT = Path(__file__).resolve().parents[3]
-FINAL_DIR = ROOT / "data" / "final"
-ANALYTICS_DIR = ROOT / "data" / "analytics"
-MODEL_DIR = ROOT / "models" / "modelagem"
-METRICS_FILE = ROOT / "reports" / "modelagem" / "metricas" / "metricas_comparativas_gerais.csv"
+DATA_DIR = Path(os.getenv("WORDGEN_DATA_DIR", ROOT / "data")).expanduser()
+MODEL_DIR = Path(os.getenv("WORDGEN_MODEL_DIR", ROOT / "models" / "modelagem")).expanduser()
+REPORTS_DIR = Path(os.getenv("WORDGEN_REPORTS_DIR", ROOT / "reports")).expanduser()
+FINAL_DIR = DATA_DIR / "final"
+ANALYTICS_DIR = DATA_DIR / "analytics"
+METRICS_FILE = REPORTS_DIR / "modelagem" / "metricas" / "metricas_comparativas_gerais.csv"
 
 _COLUNAS_AVALIACAO = {
     "aluno_id",

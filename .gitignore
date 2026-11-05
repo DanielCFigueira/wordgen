@@ -36,3 +36,8 @@ models/
 
 # Relatórios CSV (artefatos regeneráveis, bloqueados pelo hook de dados)
 reports/modelagem/metricas/
+
+# Gráficos de observações individuais: manter apenas localmente.
+reports/modelagem/graficos/efeito_regressao_media.png
+reports/modelagem/graficos/real_vs_previsto_vocabulario.png
+reports/modelagem/graficos/real_vs_previsto_tde.png

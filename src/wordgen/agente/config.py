@@ -9,6 +9,12 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def _diretorio_configurado(nome: str, padrao: Path) -> Path:
+    """Resolve um diretório local sem registrar valores de ambiente."""
+    valor = os.getenv(nome, "").strip()
+    return Path(valor).expanduser() if valor else padrao
+
+
 @dataclass(frozen=True)
 class ConfiguracaoAgente:
     """Caminhos dos artefatos publicados e configuração não secreta do agente."""
@@ -17,8 +23,22 @@ class ConfiguracaoAgente:
     modelo_groq: str = "openai/gpt-oss-20b"
 
     @property
+    def diretorio_dados(self) -> Path:
+        """Diretório privado que contém somente artefatos autorizados para a aplicação."""
+        return _diretorio_configurado("WORDGEN_DATA_DIR", self.raiz / "data")
+
+    @property
+    def diretorio_runtime(self) -> Path:
+        """Diretório gravável para caches reconstruíveis, separado dos dados publicados."""
+        return _diretorio_configurado("WORDGEN_RUNTIME_DIR", self.diretorio_dados)
+
+    @property
+    def diretorio_relatorios(self) -> Path:
+        return _diretorio_configurado("WORDGEN_REPORTS_DIR", self.raiz / "reports")
+
+    @property
     def diretorio_rag(self) -> Path:
-        return self.raiz / "data" / "rag"
+        return self.diretorio_dados / "rag"
 
     @property
     def base_conhecimento(self) -> Path:
@@ -26,7 +46,7 @@ class ConfiguracaoAgente:
 
     @property
     def indice_vetorial(self) -> Path:
-        return self.diretorio_rag / "indice_tfidf_wordgen.joblib"
+        return self.diretorio_runtime / "rag" / "indice_tfidf_wordgen.joblib"
 
     @property
     def benchmark(self) -> Path:
@@ -34,11 +54,16 @@ class ConfiguracaoAgente:
 
     @property
     def diretorio_analytics(self) -> Path:
-        return self.raiz / "data" / "analytics"
+        return self.diretorio_dados / "analytics"
 
     @property
     def metricas_modelagem(self) -> Path:
-        return self.raiz / "reports" / "modelagem" / "metricas" / "metricas_comparativas_gerais.csv"
+        return (
+            self.diretorio_relatorios
+            / "modelagem"
+            / "metricas"
+            / "metricas_comparativas_gerais.csv"
+        )
 
 
 def obter_chave_groq() -> str | None:

@@ -37,6 +37,12 @@ _PADROES_IDENTIFICADORES = (
     r"\be-?mail\b",
     r"\bcpf\b",
 )
+_PADROES_VALORES_PESSOAIS = (
+    r"\bALUNO_[0-9A-F]{16}\b",
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+    r"(?<!\d)\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[-\s]?\d{2}(?!\d)",
+    r"(?<!\d)(?:\+?55[.\s-]?)?(?:\(?\d{2}\)?[.\s-]?)?9?\d{4}[.\s-]?\d{4}(?!\d)",
+)
 _TERMOS_SEM_EVIDENCIA = ("renda familiar", "renda media", "escolaridade familiar")
 _TERMOS_ESCOPO = (
     "wordgen",
@@ -87,6 +93,13 @@ def _solicita_dado_individual(pergunta: str) -> bool:
     )
 
 
+def _contem_valor_pessoal(pergunta: str) -> bool:
+    """Evita enviar valores pessoais colados na conversa a qualquer provedor externo."""
+    return any(
+        re.search(padrao, pergunta, flags=re.IGNORECASE) for padrao in _PADROES_VALORES_PESSOAIS
+    )
+
+
 def _classificar_escopo(pergunta: str) -> str:
     """Classificação local e conservadora para impedir RAG fora do domínio WordGen."""
     texto = unicodedata.normalize("NFKD", pergunta.lower())
@@ -126,10 +139,10 @@ class AgenteWordGen:
                 "esclarecimento",
                 (),
             )
-        if _solicita_dado_individual(pergunta):
+        if _solicita_dado_individual(pergunta) or _contem_valor_pessoal(pergunta):
             return RespostaAgente(
-                "Por privacidade, o agente não consulta nem divulga identificadores "
-                "ou registros individuais. "
+                "Por privacidade, o agente não consulta, recebe nem divulga identificadores "
+                "ou registros individuais. Remova qualquer dado pessoal da pergunta. "
                 "Posso ajudar com indicadores e análises agregadas publicadas pelo projeto.",
                 "privacidade",
                 (),

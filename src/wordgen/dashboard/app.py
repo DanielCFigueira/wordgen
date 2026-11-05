@@ -30,13 +30,6 @@ def obter_dados():
     return carregar_dados()
 
 
-try:
-    data = obter_dados()
-except (OSError, ValueError, KeyError) as exc:
-    st.error(f"Não foi possível carregar as bases finais: {exc}")
-    st.info("Confirme a presença dos arquivos em `data/final/` e reinicie a aplicação.")
-    st.stop()
-
 with st.sidebar:
     st.markdown('<div class="wg-brand">word<span>gen</span></div>', unsafe_allow_html=True)
     st.caption("ANÁLISE EDUCACIONAL · UFPA")
@@ -57,6 +50,24 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.divider()
+    if pagina == "Assistente analítico":
+        st.caption("O assistente usa somente fontes agregadas e documentação publicada.")
+
+if pagina == "Assistente analítico":
+    renderizar_assistente()
+    st.stop()
+
+try:
+    data = obter_dados()
+except (OSError, ValueError, KeyError) as exc:
+    st.error(f"Não foi possível carregar as bases finais: {exc}")
+    st.info(
+        "Configure os artefatos privados de produção e reinicie a aplicação. "
+        "Consulte o README para os diretórios exigidos."
+    )
+    st.stop()
+
+with st.sidebar:
     st.markdown("**Recorte das avaliações**")
     filtro_instrumento = st.selectbox(
         "Instrumento",
@@ -73,7 +84,7 @@ with st.sidebar:
         return sorted(set().union(*(set(df[col].dropna().astype(str)) for df in bases)))
 
     categoria_analitica = "Sexo"
-    if pagina not in ["Modelagem", "Assistente analítico"]:
+    if pagina != "Modelagem":
         fases = st.multiselect(
             "Fase", all_values("fase"), format_func=lambda x: f"Fase {x.removeprefix('Fase ')}"
         )
@@ -123,7 +134,5 @@ elif pagina == "Acompanhamento longitudinal":
     pagina_longitudinal(data, filtro_instrumento)
 elif pagina == "Qualidade dos dados":
     pagina_qualidade(data, filtros)
-elif pagina == "Modelagem":
-    pagina_modelagem(data, filtro_instrumento)
 else:
-    renderizar_assistente()
+    pagina_modelagem(data, filtro_instrumento)
