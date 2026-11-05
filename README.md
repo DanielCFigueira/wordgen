@@ -36,6 +36,12 @@ uv run streamlit run src/wordgen/dashboard/app.py
 
 O dashboard lê os arquivos consolidados existentes em `data/final/`, os resultados de modelagem em `reports/modelagem/metricas/` e os metadados em `models/modelagem/`. Ele não reexecuta o pipeline nem o treinamento.
 
+Quando os cinco CSVs finais obrigatórios não estão disponíveis — como na publicação pública no
+Streamlit Community Cloud — o painel inicia automaticamente em **modo de demonstração** com dados
+inteiramente sintéticos. Esse fallback é determinístico, não lê nem deriva qualquer registro local
+e mostra um aviso visível. Artefatos analíticos, de modelagem e RAG ausentes continuam indicados
+como indisponíveis; o modo de demonstração não inventa resultados desses artefatos.
+
 Após a inicialização, acesse `http://localhost:8501` no navegador. O painel reúne: visão geral, Vocabulário, TDE II · Escrita, contexto dos estudantes, comparação pré/pós (Effect Size), acompanhamento longitudinal, qualidade dos dados e modelagem. Os filtros atuam sobre avaliações; a seção de ganho sempre usa pares de pré e pós, e os resultados persistidos de modelagem só respondem ao filtro de instrumento.
 
 Os CSVs `dataset_vocabulario.csv`, `dataset_tde.csv`, `pareado_vocabulario.csv`, `pareado_tde.csv` e `dim_aluno.csv` são obrigatórios. Os artefatos analíticos em `data/analytics/` — KPIs, Effect Size e longitudinal — são lidos como resultados pré-calculados pelos notebooks; o dashboard não os recalcula. O relatório de qualidade, as métricas comparativas e os metadados de modelos são complementares: quando estiverem ausentes, a área correspondente informa a indisponibilidade sem executar pipeline ou treinamento. Para reconstruir os datasets finais ausentes, use apenas o orquestrador documentado em [Execução Completa do Pipeline](#2-execução-completa-do-pipeline).
@@ -100,9 +106,9 @@ O benchmark mede se as perguntas de referência recebem resposta e fonte identif
 Clone o repositório e sincronize as dependências com o `uv`:
 
 ```bash
-git clone <URL_DO_REPOSITORIO_PRIVADO>
+git clone https://github.com/DanielCFigueira/wordgen.git
 cd wordgen
-uv sync
+uv sync --locked
 ```
 
 > [!IMPORTANT]

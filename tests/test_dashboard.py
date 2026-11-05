@@ -3,6 +3,7 @@
 import pandas as pd
 import pytest
 
+from wordgen.dashboard import dados as dados_dashboard
 from wordgen.dashboard.analise import (
     agregar_demografia,
     associar_metadados_modelagem,
@@ -11,7 +12,7 @@ from wordgen.dashboard.analise import (
     resumo_cobertura,
     resumo_modelagem,
 )
-from wordgen.dashboard.dados import _validar_pares
+from wordgen.dashboard.dados import _validar_pares, carregar_dados
 
 
 def test_filtro_combinado_preserva_apenas_avaliacoes_no_recorte() -> None:
@@ -223,3 +224,50 @@ def test_resumo_modelagem_prioriza_mae_e_compara_com_baseline() -> None:
     resumo = resumo_modelagem(metricas)
     assert resumo.iloc[0]["Modelo"] == "Random Forest"
     assert resumo.iloc[0]["Reducao MAE (%)"] == pytest.approx(20.0)
+
+
+def test_modo_demonstracao_gera_esquemas_e_pares_consistentes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setattr(dados_dashboard, "FINAL_DIR", tmp_path / "sem_dados_reais")
+    dados = carregar_dados()
+
+    assert dados["modo_demonstracao"] is True
+    assert set(dados["vocabulario"].columns).issuperset(
+        {"aluno_id", "fase", "periodo", "total_vocabulario", "Q01", "Q50"}
+    )
+    assert set(dados["tde"].columns).issuperset(
+        {"aluno_id", "fase", "periodo", "total_tde", "P01", "P40"}
+    )
+    assert dados["vocabulario"]["total_vocabulario"].between(0, 50).all()
+    assert dados["tde"]["total_tde"].between(0, 80).all()
+    itens_vocabulario = dados["vocabulario"].filter(regex=r"^Q\d{2}$")
+    itens_tde = dados["tde"].filter(regex=r"^P\d{2}$")
+    assert itens_vocabulario.shape[1] == 50
+    assert itens_tde.shape[1] == 40
+    assert set(itens_vocabulario.stack().unique()).issubset({0, 1})
+    assert set(itens_tde.stack().unique()).issubset({0, 1, 2})
+    for nome, maximo in (("pareado_vocabulario", 50), ("pareado_tde", 80)):
+        pares = dados[nome]
+        _validar_pares(pares, nome, maximo)
+        assert not pares.duplicated(["aluno_id", "fase"]).any()
+        assert pares["aluno_id"].isin(dados["dim_aluno"]["aluno_id"]).all()
+
+
+def test_carregamento_real_permanece_prioritario_quando_os_cinco_arquivos_existem(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    final = tmp_path / "final"
+    final.mkdir()
+    demonstracao = dados_dashboard._gerar_dados_demonstracao()
+    demonstracao["vocabulario"].to_csv(final / "dataset_vocabulario.csv", index=False)
+    demonstracao["tde"].to_csv(final / "dataset_tde.csv", index=False)
+    demonstracao["pareado_vocabulario"].to_csv(final / "pareado_vocabulario.csv", index=False)
+    demonstracao["pareado_tde"].to_csv(final / "pareado_tde.csv", index=False)
+    demonstracao["dim_aluno"].to_csv(final / "dim_aluno.csv", index=False)
+    monkeypatch.setattr(dados_dashboard, "FINAL_DIR", final)
+
+    dados = carregar_dados()
+
+    assert dados["modo_demonstracao"] is False
+    assert len(dados["vocabulario"]) == len(demonstracao["vocabulario"])

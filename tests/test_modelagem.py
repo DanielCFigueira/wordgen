@@ -194,9 +194,7 @@ def test_merge_dim_aluno_com_duplicatas_detectado(df_pareado_sintetico, df_dim_a
         )
 
 
-def test_preparacao_exp_b_rejeita_id_nulo_na_dimensao(
-    df_pareado_sintetico, df_dim_aluno_sintetico
-):
+def test_preparacao_exp_b_rejeita_id_nulo_na_dimensao(df_pareado_sintetico, df_dim_aluno_sintetico):
     dim_com_id_nulo = df_dim_aluno_sintetico.copy()
     dim_com_id_nulo.loc[0, "aluno_id"] = None
 

@@ -67,6 +67,12 @@ except (OSError, ValueError, KeyError) as exc:
     )
     st.stop()
 
+if data.get("modo_demonstracao"):
+    st.warning(
+        "Modo de demonstração: esta versão usa dados inteiramente sintéticos, "
+        "criados somente para navegação pública. Nenhum dado de estudante real é exibido."
+    )
+
 with st.sidebar:
     st.markdown("**Recorte das avaliações**")
     filtro_instrumento = st.selectbox(

@@ -2,6 +2,7 @@
 
 import json
 import os
+import random
 from pathlib import Path
 
 import pandas as pd
@@ -54,6 +55,14 @@ _ARQUIVOS_ANALITICOS = {
     "painel_longitudinal": "painel_longitudinal.csv",
     "perfil_contextual": "perfil_socioeconomico_desempenho.csv",
 }
+
+_ARQUIVOS_FINAIS_OBRIGATORIOS = (
+    "dataset_vocabulario.csv",
+    "dataset_tde.csv",
+    "pareado_vocabulario.csv",
+    "pareado_tde.csv",
+    "dim_aluno.csv",
+)
 
 
 def _ler_csv_obrigatorio(path: Path) -> pd.DataFrame:
@@ -110,13 +119,128 @@ def _validar_dimensao(dados: pd.DataFrame) -> None:
         raise ValueError("dim_aluno deve conter exatamente um registro não nulo por aluno_id.")
 
 
+def _itens_vocabulario(gerador: random.Random, probabilidade: float) -> dict[str, int]:
+    return {f"Q{indice:02d}": int(gerador.random() < probabilidade) for indice in range(1, 51)}
+
+
+def _itens_tde(gerador: random.Random, nivel: float) -> dict[str, int]:
+    itens: dict[str, int] = {}
+    for indice in range(1, 41):
+        sorteio = gerador.random()
+        itens[f"P{indice:02d}"] = 2 if sorteio < nivel else 1 if sorteio < 0.78 else 0
+    return itens
+
+
+def _gerar_dados_demonstracao() -> dict[str, pd.DataFrame]:
+    """Cria uma base fictícia, determinística e internamente consistente para demonstração.
+
+    Esta função não lê, amostra nem transforma qualquer artefato de dados do projeto.
+    """
+    gerador = random.Random(20261104)
+    estudantes: list[dict[str, str]] = []
+    for indice in range(72):
+        serie = str(6 + indice % 4)
+        estudantes.append(
+            {
+                "aluno_id": f"DEMO_{indice + 1:03d}",
+                "sexo": ("F", "M")[indice % 2],
+                "faixa_etaria": ("11-12", "13-14", "15+")[indice % 3],
+                "cor_raca": ("PARDA", "BRANCA", "PRETA")[indice % 3],
+                "zona": ("URBANA", "RURAL")[indice % 2],
+                "necessidade_especial": "SIM" if indice % 4 == 0 else "NAO_REGISTRADO",
+                "escola": f"Escola demonstrativa {(indice % 3) + 1}",
+                "serie": serie,
+                "turma": f"{serie}{chr(65 + (indice // 4) % 3)}",
+            }
+        )
+
+    def criar_instrumento(nome_total: str, maximo: int, itens_fn):
+        avaliacoes: list[dict[str, object]] = []
+        pares: list[dict[str, object]] = []
+        for estudante in estudantes:
+            for fase in ("2", "3", "4"):
+                totais: dict[str, int] = {}
+                for periodo, ajuste in (("pre", 0.0), ("pos", 0.07)):
+                    variacao = (int(estudante["aluno_id"][-3:]) % 5) * 0.01
+                    nivel = min(0.82, 0.38 + 0.05 * int(fase) + ajuste + variacao)
+                    itens = itens_fn(gerador, nivel)
+                    total = sum(itens.values())
+                    totais[periodo] = total
+                    avaliacoes.append(
+                        {
+                            "aluno_id": estudante["aluno_id"],
+                            "escola": estudante["escola"],
+                            "serie": estudante["serie"],
+                            "turma": estudante["turma"],
+                            "fase": fase,
+                            "periodo": periodo,
+                            "completo": True,
+                            "pct_completude": 1.0,
+                            "n_validos": 50 if maximo == 50 else 40,
+                            nome_total: total,
+                            **itens,
+                        }
+                    )
+                pares.append(
+                    {
+                        "aluno_id": estudante["aluno_id"],
+                        "fase": fase,
+                        "escola": estudante["escola"],
+                        "serie": estudante["serie"],
+                        "turma": estudante["turma"],
+                        "total_pre": totais["pre"],
+                        "total_pos": totais["pos"],
+                        "pct_pre": 1.0,
+                        "pct_pos": 1.0,
+                        "completo_pre": True,
+                        "completo_pos": True,
+                    }
+                )
+        return pd.DataFrame(avaliacoes), pd.DataFrame(pares)
+
+    vocabulario, pareado_vocabulario = criar_instrumento(
+        "total_vocabulario", 50, _itens_vocabulario
+    )
+    tde, pareado_tde = criar_instrumento("total_tde", 80, _itens_tde)
+    dimensao = pd.DataFrame(
+        [
+            {
+                chave: valor
+                for chave, valor in estudante.items()
+                if chave not in {"escola", "serie", "turma"}
+            }
+            for estudante in estudantes
+        ]
+    )
+    return {
+        "vocabulario": vocabulario,
+        "tde": tde,
+        "pareado_vocabulario": pareado_vocabulario,
+        "pareado_tde": pareado_tde,
+        "dim_aluno": dimensao,
+    }
+
+
+def _dados_finais_disponiveis() -> bool:
+    return all((FINAL_DIR / nome).is_file() for nome in _ARQUIVOS_FINAIS_OBRIGATORIOS)
+
+
 def carregar_dados() -> dict[str, pd.DataFrame | dict | str]:
     """Lê uma vez os datasets publicados e mantém apenas colunas utilizáveis na análise."""
-    vocabulary = _ler_csv_obrigatorio(FINAL_DIR / "dataset_vocabulario.csv")
-    tde = _ler_csv_obrigatorio(FINAL_DIR / "dataset_tde.csv")
-    paired_vocabulary = _ler_csv_obrigatorio(FINAL_DIR / "pareado_vocabulario.csv")
-    paired_tde = _ler_csv_obrigatorio(FINAL_DIR / "pareado_tde.csv")
-    students = _ler_csv_obrigatorio(FINAL_DIR / "dim_aluno.csv")
+    demonstracao = not _dados_finais_disponiveis()
+    if demonstracao:
+        dados_base = _gerar_dados_demonstracao()
+        vocabulary = dados_base["vocabulario"]
+        tde = dados_base["tde"]
+        paired_vocabulary = dados_base["pareado_vocabulario"]
+        paired_tde = dados_base["pareado_tde"]
+        students = dados_base["dim_aluno"]
+    else:
+        vocabulary = _ler_csv_obrigatorio(FINAL_DIR / "dataset_vocabulario.csv")
+        tde = _ler_csv_obrigatorio(FINAL_DIR / "dataset_tde.csv")
+        paired_vocabulary = _ler_csv_obrigatorio(FINAL_DIR / "pareado_vocabulario.csv")
+        paired_tde = _ler_csv_obrigatorio(FINAL_DIR / "pareado_tde.csv")
+        students = _ler_csv_obrigatorio(FINAL_DIR / "dim_aluno.csv")
 
     _validar_avaliacoes(vocabulary, "dataset_vocabulario", "total_vocabulario", 50)
     _validar_avaliacoes(tde, "dataset_tde", "total_tde", 80)
@@ -154,5 +278,6 @@ def carregar_dados() -> dict[str, pd.DataFrame | dict | str]:
         "metricas": metrics,
         "metadados_modelos": metadata,
         "relatorio_qualidade": quality,
+        "modo_demonstracao": demonstracao,
         **analytics,
     }
